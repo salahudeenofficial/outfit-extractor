@@ -68,7 +68,11 @@ def load_model(
         last_error = None
         
         # Try task/model_cls combinations based on working VTON project
+        runner_initialized = False
+        
         for task in task_options:
+            if runner_initialized:
+                break
             for model_cls in model_cls_options:
                 try:
                     logger.info(f"Trying: LightX2VPipeline(model_path='{model_path}', model_cls='{model_cls}', task='{task}')")
@@ -108,21 +112,21 @@ def load_model(
                     # Verify runner was created (critical for generate() to work)
                     if hasattr(pipeline, 'runner') and pipeline.runner is not None:
                         logger.info("Generator created successfully - runner initialized")
+                        runner_initialized = True
+                        break
                     else:
-                        logger.warning("create_generator() completed but runner not initialized!")
-                        raise RuntimeError("Pipeline runner not initialized after create_generator()")
-                    
-                    break
+                        logger.warning(f"create_generator() completed but runner not initialized for model_cls='{model_cls}'")
+                        pipeline = None  # Reset so we try the next option
+                        continue
+                        
                 except Exception as e:
                     last_error = e
-                    logger.debug(f"Failed with model_cls='{model_cls}', task='{task}': {e}")
+                    logger.warning(f"Failed with model_cls='{model_cls}', task='{task}': {e}")
+                    pipeline = None  # Reset on failure
                     continue
-            
-            if pipeline is not None:
-                break
         
-        # If still None, try without model_cls (auto-detect)
-        if pipeline is None:
+        # If still not initialized, try without model_cls (auto-detect)
+        if not runner_initialized:
             try:
                 logger.info(f"Trying: LightX2VPipeline(model_path='{model_path}', task='i2i') without model_cls")
                 pipeline = LightX2VPipeline(
@@ -154,14 +158,16 @@ def load_model(
                 # Verify runner was created
                 if hasattr(pipeline, 'runner') and pipeline.runner is not None:
                     logger.info("Generator created successfully - runner initialized")
+                    runner_initialized = True
                 else:
                     logger.warning("create_generator() completed but runner not initialized!")
-                    raise RuntimeError("Pipeline runner not initialized after create_generator()")
+                    pipeline = None
             except Exception as e:
                 last_error = e
-                logger.debug(f"Failed without model_cls: {e}")
+                logger.warning(f"Failed without model_cls: {e}")
+                pipeline = None
         
-        if pipeline is None:
+        if not runner_initialized or pipeline is None:
             error_msg = (
                 f"Failed to initialize LightX2VPipeline with model_path='{model_path}'. "
                 f"LightX2V requires 'task' and 'model_cls' parameters. "
