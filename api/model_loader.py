@@ -80,6 +80,7 @@ def load_model(
                         logger.info("Using PyTorch SDPA attention")
                     
                     # Create generator with required parameters (from working VTON project)
+                    logger.info(f"Calling create_generator(attn_mode={attn_mode}, infer_steps=4, guidance_scale=1.0, width=768, height=1024, aspect_ratio='3:4')")
                     pipeline.create_generator(
                         attn_mode=attn_mode,
                         infer_steps=4,  # 4 steps for Lightning model
@@ -88,7 +89,13 @@ def load_model(
                         height=1024,
                         aspect_ratio="3:4",
                     )
-                    logger.info("Generator created successfully")
+                    
+                    # Verify runner was created (critical for generate() to work)
+                    if hasattr(pipeline, 'runner') and pipeline.runner is not None:
+                        logger.info("Generator created successfully - runner initialized")
+                    else:
+                        logger.warning("create_generator() completed but runner not initialized!")
+                        raise RuntimeError("Pipeline runner not initialized after create_generator()")
                     
                     break
                 except Exception as e:
@@ -119,6 +126,7 @@ def load_model(
                 except Exception:
                     pass
                 
+                logger.info(f"Calling create_generator(attn_mode={attn_mode}, ...)")
                 pipeline.create_generator(
                     attn_mode=attn_mode,
                     infer_steps=4,
@@ -127,7 +135,13 @@ def load_model(
                     height=1024,
                     aspect_ratio="3:4",
                 )
-                logger.info("Generator created successfully")
+                
+                # Verify runner was created
+                if hasattr(pipeline, 'runner') and pipeline.runner is not None:
+                    logger.info("Generator created successfully - runner initialized")
+                else:
+                    logger.warning("create_generator() completed but runner not initialized!")
+                    raise RuntimeError("Pipeline runner not initialized after create_generator()")
             except Exception as e:
                 last_error = e
                 logger.debug(f"Failed without model_cls: {e}")
