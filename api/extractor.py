@@ -1,11 +1,15 @@
-"""Outfit extraction logic with fixed prompt for consistent results."""
+"""Outfit extraction logic with fixed prompt for consistent results.
+
+Based on the working VTON project (try_og_pipeline).
+Key: Use 3:4 aspect ratio and monkey-patch run_pipeline to inject aspect_ratio.
+"""
 
 from PIL import Image
 import numpy as np
 import tempfile
 import os
 import json
-from typing import Optional, Any
+from typing import Optional, Any, Tuple
 
 
 # Fixed prompt for outfit extraction
@@ -18,17 +22,53 @@ OUTFIT_EXTRACTION_PROMPT = (
     "No human present. Only the outfit on white background."
 )
 
+# Target resolution for 3:4 aspect ratio (portrait)
+TARGET_WIDTH = 768
+TARGET_HEIGHT = 1024
+TARGET_ASPECT_RATIO = "3:4"
 
-def preprocess_image(image: Image.Image, max_size: int = 1024) -> Image.Image:
+
+def calculate_target_resolution(orig_width: int, orig_height: int) -> Tuple[int, int, str]:
+    """
+    Calculate target resolution maintaining aspect ratio.
+    Uses 3:4 for portrait, 4:3 for landscape, 1:1 for square.
+    
+    From VTON project: dimensions must be divisible by 16.
+    """
+    orig_ratio = orig_width / orig_height
+    
+    if orig_ratio < 0.8:  # Portrait (taller than wide)
+        target_aspect_ratio = "3:4"
+        target_width = TARGET_WIDTH
+        target_height = TARGET_HEIGHT
+    elif orig_ratio > 1.2:  # Landscape (wider than tall)
+        target_aspect_ratio = "4:3"
+        target_width = TARGET_HEIGHT  # Swap for landscape
+        target_height = TARGET_WIDTH
+    else:  # Square-ish
+        target_aspect_ratio = "1:1"
+        target_width = 1024
+        target_height = 1024
+    
+    # Ensure dimensions are divisible by 16
+    target_width = (target_width // 16) * 16
+    target_height = (target_height // 16) * 16
+    
+    return target_width, target_height, target_aspect_ratio
+
+
+def preprocess_image(image: Image.Image, target_width: int = TARGET_WIDTH, target_height: int = TARGET_HEIGHT) -> Image.Image:
     """
     Preprocess input image for model inference.
+    Resize to target dimensions (3:4 aspect ratio by default).
     
     Args:
         image: Input PIL Image.
-        max_size: Maximum dimension for resizing while maintaining aspect ratio.
+        target_width: Target width (default 768 for 3:4).
+        target_height: Target height (default 1024 for 3:4).
     
     Returns:
-        Preprocessed PIL Image.
+        Preprocessed PIL Image resized to target dimensions.
     """
     if not isinstance(image, Image.Image):
         raise ValueError("Input must be a PIL Image object")
@@ -36,18 +76,8 @@ def preprocess_image(image: Image.Image, max_size: int = 1024) -> Image.Image:
     if image.mode != "RGB":
         image = image.convert("RGB")
     
-    width, height = image.size
-    if max(width, height) <= max_size:
-        return image
-    
-    if width > height:
-        new_width = max_size
-        new_height = int(height * (max_size / width))
-    else:
-        new_height = max_size
-        new_width = int(width * (max_size / height))
-    
-    return image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    # Resize to target dimensions (maintains consistency with VTON project)
+    return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
 
 def postprocess_image(image: Image.Image, ensure_white_bg: bool = True) -> Image.Image:
@@ -111,16 +141,14 @@ def extract_outfit(
     if prompt is None:
         prompt = OUTFIT_EXTRACTION_PROMPT
     
-    processed_image = preprocess_image(input_image)
+    # Calculate target resolution based on input aspect ratio
+    orig_width, orig_height = input_image.size
+    target_width, target_height, target_aspect_ratio = calculate_target_resolution(orig_width, orig_height)
     
-    if height is None:
-        height = processed_image.height
-    if width is None:
-        width = processed_image.width
+    # Preprocess image to target dimensions
+    processed_image = preprocess_image(input_image, target_width, target_height)
     
     # Run inference using LightX2V
-    # The pipeline config is already set during initialization, so we can call generate() directly
-    # If create_generator() causes KeyError, skip it and use the pre-configured settings
     output = None
     last_error = None
     
@@ -129,9 +157,9 @@ def extract_outfit(
     temp_output_file = None
     try:
         # Create temporary file for input image
-        temp_fd, temp_input_path = tempfile.mkstemp(suffix='.jpg')
+        temp_fd, temp_input_path = tempfile.mkstemp(suffix='.png')
         os.close(temp_fd)
-        processed_image.save(temp_input_path, format='JPEG', quality=95)
+        processed_image.save(temp_input_path, format='PNG')
         temp_input_file = temp_input_path
         
         # Create temporary file for output image
@@ -139,24 +167,42 @@ def extract_outfit(
         os.close(temp_fd2)
         temp_output_file = temp_output_path
         
-        # Define negative prompt - required by LightX2V generate()
+        # Define negative prompt
         negative_prompt = "blurry, low quality, distorted, artifacts, deformed, bad anatomy"
         
-        # Simple pattern from working VTON project:
-        # - create_generator() is called ONCE during model loading (not per inference)
-        # - generate() is called with simple parameters
-        # - Resolution is controlled by pre-resizing the input image
-        if hasattr(pipeline, 'generate'):
-            try:
-                output = pipeline.generate(
-                    seed=42,
-                    image_path=temp_input_path,
-                    prompt=prompt,
-                    negative_prompt=negative_prompt,
-                    save_result_path=temp_output_path
-                )
-            except Exception as e:
-                last_error = e
+        # Monkey-patch run_pipeline to inject aspect_ratio into input_info
+        # This is needed because LightX2V's get_custom_shape() checks input_info.aspect_ratio
+        # (From PROBLEMS_FACED.txt in VTON project)
+        if hasattr(pipeline, 'runner') and hasattr(pipeline.runner, 'run_pipeline'):
+            original_run_pipeline = pipeline.runner.run_pipeline
+            
+            def patched_run_pipeline(input_info):
+                input_info.aspect_ratio = target_aspect_ratio
+                # Also need to set _auto_resize in config (get_custom_shape checks it)
+                pipeline.runner.config["_auto_resize"] = False
+                return original_run_pipeline(input_info)
+            
+            pipeline.runner.run_pipeline = patched_run_pipeline
+        
+        try:
+            # Generate with simple parameters
+            # Resolution is controlled by pre-resizing the input image
+            output = pipeline.generate(
+                seed=42,
+                image_path=temp_input_path,
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                save_result_path=temp_output_path
+            )
+        except Exception as e:
+            last_error = e
+        finally:
+            # Restore original method
+            if hasattr(pipeline, 'runner') and hasattr(pipeline.runner, 'run_pipeline'):
+                try:
+                    pipeline.runner.run_pipeline = original_run_pipeline
+                except:
+                    pass
         
         # If output is None but save_result_path was used, load from file
         if output is None and temp_output_file and os.path.exists(temp_output_file):
