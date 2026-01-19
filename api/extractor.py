@@ -4,6 +4,7 @@ from PIL import Image
 import numpy as np
 import tempfile
 import os
+import json
 from typing import Optional, Any
 
 
@@ -141,13 +142,14 @@ def extract_outfit(
         # Define negative prompt - required by LightX2V generate()
         negative_prompt = "blurry, low quality, distorted, artifacts, deformed, bad anatomy"
         
+        # Create temporary config JSON file
+        temp_config_file = None
+        
         # Pattern: Use set_infer_config_json() for config, then create_generator(), then generate()
-        # set_infer_config_json accepts target_width/target_height
-        # create_generator() sets up internal state (aspect_ratio, etc.)
-        # generate() runs the actual inference
+        # set_infer_config_json expects a FILE PATH to a JSON file, not a dict
         if hasattr(pipeline, 'set_infer_config_json') and hasattr(pipeline, 'create_generator') and hasattr(pipeline, 'generate'):
             try:
-                # Step 1: Set config via JSON (this accepts target_width/target_height)
+                # Step 1: Write config to temporary JSON file
                 config = {
                     "infer_steps": num_inference_steps,
                     "target_width": width,
@@ -155,12 +157,19 @@ def extract_outfit(
                     "sample_guide_scale": guidance_scale,
                     "sample_shift": 5.0
                 }
-                pipeline.set_infer_config_json(config)
+                temp_fd3, temp_config_path = tempfile.mkstemp(suffix='.json')
+                os.close(temp_fd3)
+                with open(temp_config_path, 'w') as f:
+                    json.dump(config, f)
+                temp_config_file = temp_config_path
                 
-                # Step 2: Create generator to set up internal state (aspect_ratio, etc.)
+                # Step 2: Set config via JSON file path
+                pipeline.set_infer_config_json(temp_config_path)
+                
+                # Step 3: Create generator to set up internal state (aspect_ratio, etc.)
                 pipeline.create_generator()
                 
-                # Step 3: Generate
+                # Step 4: Generate
                 output = pipeline.generate(
                     seed=42,
                     image_path=temp_input_path,
@@ -170,11 +179,40 @@ def extract_outfit(
                 )
             except Exception as e:
                 last_error = e
+            finally:
+                # Clean up config file
+                if temp_config_file and os.path.exists(temp_config_file):
+                    try:
+                        os.unlink(temp_config_file)
+                    except Exception:
+                        pass
         
-        # Fallback: Try with just create_generator() with minimal params
+        # Fallback: Try set_infer_config (might accept dict directly)
+        if output is None and hasattr(pipeline, 'set_infer_config') and hasattr(pipeline, 'create_generator') and hasattr(pipeline, 'generate'):
+            try:
+                config = {
+                    "infer_steps": num_inference_steps,
+                    "target_width": width,
+                    "target_height": height,
+                    "sample_guide_scale": guidance_scale,
+                    "sample_shift": 5.0
+                }
+                pipeline.set_infer_config(config)
+                pipeline.create_generator()
+                output = pipeline.generate(
+                    seed=42,
+                    image_path=temp_input_path,
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    save_result_path=temp_output_path
+                )
+            except Exception as e:
+                if last_error is None:
+                    last_error = e
+        
+        # Fallback: Try with just create_generator() with no args
         if output is None and hasattr(pipeline, 'create_generator') and hasattr(pipeline, 'generate'):
             try:
-                # Try create_generator with no args (use defaults from initialization)
                 pipeline.create_generator()
                 output = pipeline.generate(
                     seed=42,
