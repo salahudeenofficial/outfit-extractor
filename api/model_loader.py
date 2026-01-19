@@ -38,61 +38,90 @@ def load_model(
     
     try:
         from lightx2v import LightX2VPipeline
+        
+        # LightX2V requires: task, model_path, model_cls
+        # Signature: LightX2VPipeline(task, model_path, model_cls, ...)
+        # For Qwen Image Edit, try common task names and model classes
+        task_options = ["image_edit", "image-edit", "qwen_image_edit", "edit", "img_edit"]
+        
         logger.info(f"Loading model from: {model_path}")
         logger.info(f"Using device: {device}")
-        
-        # LightX2V uses constructor initialization
-        # Try different initialization patterns (without device parameter)
-        initialization_patterns = [
-            # Pattern 1: model_path as first positional argument
-            lambda: LightX2VPipeline(model_path),
-            # Pattern 2: model_path keyword argument
-            lambda: LightX2VPipeline(model_path=model_path),
-            # Pattern 3: model_id keyword argument
-            lambda: LightX2VPipeline(model_id=model_path),
-            # Pattern 4: Try with cache_dir
-            lambda: LightX2VPipeline(model_path, cache_dir=cache_dir),
-            # Pattern 5: model_path and cache_dir as keywords
-            lambda: LightX2VPipeline(model_path=model_path, cache_dir=cache_dir),
-        ]
         
         pipeline = None
         last_error = None
         
-        for i, init_func in enumerate(initialization_patterns, 1):
+        # Try different task names - model_cls might be optional or auto-detected
+        for task in task_options:
             try:
-                logger.info(f"Trying initialization pattern {i}...")
-                pipeline = init_func()
-                logger.info(f"Successfully initialized pipeline using pattern {i}")
+                # Pattern 1: Try without model_cls (might be optional)
+                logger.info(f"Trying: LightX2VPipeline(task='{task}', model_path='{model_path}')")
+                pipeline = LightX2VPipeline(task=task, model_path=model_path)
+                logger.info(f"Successfully initialized pipeline with task='{task}'")
                 break
             except TypeError as e:
-                last_error = e
-                logger.info(f"Pattern {i} failed (TypeError): {e}")
-                continue
+                # If model_cls is required, try with different model_cls values
+                if "model_cls" in str(e) or "required" in str(e).lower():
+                    logger.debug(f"model_cls required, trying with model_cls parameter...")
+                    # Try with model_cls as string
+                    model_cls_options = [
+                        "QwenImageEditPipeline",
+                        "QwenImageEdit",
+                        "QwenImageEdit2511",
+                        "QwenImageEditLightning",
+                    ]
+                    
+                    for model_cls in model_cls_options:
+                        try:
+                            logger.info(f"Trying: LightX2VPipeline(task='{task}', model_path='{model_path}', model_cls='{model_cls}')")
+                            pipeline = LightX2VPipeline(task=task, model_path=model_path, model_cls=model_cls)
+                            logger.info(f"Successfully initialized with task='{task}', model_cls='{model_cls}'")
+                            break
+                        except Exception as e2:
+                            last_error = e2
+                            logger.debug(f"Failed with model_cls='{model_cls}': {e2}")
+                            continue
+                    
+                    if pipeline is not None:
+                        break
+                else:
+                    last_error = e
+                    logger.debug(f"Failed with task='{task}': {e}")
+                    continue
             except Exception as e:
                 last_error = e
-                logger.info(f"Pattern {i} failed: {type(e).__name__}: {e}")
+                logger.debug(f"Failed with task='{task}': {type(e).__name__}: {e}")
                 continue
         
+        # If still None, try importing model class directly
         if pipeline is None:
-            # Provide helpful error message
+            try:
+                from lightx2v.models import QwenImageEditPipeline
+                logger.info("Trying with imported QwenImageEditPipeline class...")
+                pipeline = LightX2VPipeline(
+                    task="image_edit",
+                    model_path=model_path,
+                    model_cls=QwenImageEditPipeline
+                )
+                logger.info("Successfully initialized with imported model class")
+            except ImportError:
+                logger.debug("Could not import QwenImageEditPipeline")
+            except Exception as e:
+                last_error = e
+                logger.debug(f"Failed with imported model class: {e}")
+        
+        if pipeline is None:
             error_msg = (
                 f"Failed to initialize LightX2VPipeline with model_path='{model_path}'. "
-                f"Tried {len(initialization_patterns)} different initialization patterns. "
+                f"LightX2V requires 'task' and 'model_cls' parameters. "
+                f"Tried tasks: {task_options}. "
                 f"Last error: {last_error}. "
-                f"Please check LightX2V documentation for the correct initialization API."
+                f"\n\nLightX2VPipeline signature: (task, model_path, model_cls, ...) "
+                f"\nPlease check LightX2V documentation for Qwen Image Edit task and model_cls values."
             )
             raise RuntimeError(error_msg)
         
-        # Move to device if needed and not already set
-        if device == "cuda" and torch.cuda.is_available():
-            try:
-                if hasattr(pipeline, 'to'):
-                    pipeline = pipeline.to(device)
-                elif hasattr(pipeline, 'cuda'):
-                    pipeline = pipeline.cuda()
-            except Exception as e:
-                logger.warning(f"Could not move pipeline to {device}: {e}")
+        # Device is handled automatically by LightX2V based on CUDA availability
+        logger.info(f"Pipeline initialized successfully")
         
         return pipeline
         
