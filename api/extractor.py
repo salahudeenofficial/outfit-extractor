@@ -115,22 +115,49 @@ def extract_outfit(
     if width is None:
         width = processed_image.width
     
-    # Run inference
-    # Note: Actual API may vary based on LightX2V implementation
-    # Adjust based on actual pipeline interface
-    output = pipeline(
-        image=processed_image,
-        prompt=prompt,
-        num_inference_steps=num_inference_steps,
-        guidance_scale=guidance_scale,
-        height=height,
-        width=width
-    )
+    # Run inference using LightX2V generate method
+    # LightX2VPipeline uses generate() method, not direct call
+    try:
+        # Try generate method first (most common for LightX2V)
+        if hasattr(pipeline, 'generate'):
+            output = pipeline.generate(
+                prompt=prompt,
+                image=processed_image,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                height=height,
+                width=width
+            )
+        else:
+            # Fallback: try calling directly (for compatibility)
+            output = pipeline(
+                image=processed_image,
+                prompt=prompt,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                height=height,
+                width=width
+            )
+    except TypeError as e:
+        # Try with different parameter names
+        try:
+            output = pipeline.generate(
+                prompt=prompt,
+                image=processed_image,
+                steps=num_inference_steps,
+                guidance=guidance_scale
+            )
+        except Exception:
+            raise RuntimeError(f"Failed to generate image: {e}")
     
     # Extract image from output
-    # Output format may vary: could be dict with 'images' key or direct image
+    # LightX2V generate() typically returns a dict with 'images' key or list
     if isinstance(output, dict):
-        result_image = output.get("images", [output.get("image")])[0]
+        result_image = output.get("images", output.get("image"))
+        if result_image is None:
+            raise ValueError("Output dict does not contain 'images' or 'image' key")
+        if isinstance(result_image, list):
+            result_image = result_image[0]
     elif isinstance(output, list):
         result_image = output[0]
     else:
@@ -140,7 +167,9 @@ def extract_outfit(
     if not isinstance(result_image, Image.Image):
         if hasattr(result_image, 'images'):
             result_image = result_image.images[0]
+        elif hasattr(result_image, 'image'):
+            result_image = result_image.image
         else:
-            raise ValueError("Unexpected output format from pipeline")
+            raise ValueError(f"Unexpected output format from pipeline: {type(result_image)}")
     
     return postprocess_image(result_image, ensure_white_bg=True)
