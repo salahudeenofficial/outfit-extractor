@@ -118,166 +118,93 @@ def extract_outfit(
         width = processed_image.width
     
     # Run inference using LightX2V
-    # Correct API pattern: create_generator() sets generation params, generate() takes inputs
+    # Correct API pattern from LightX2V documentation:
+    # 1. create_generator(infer_steps, height, width, guidance_scale, ...) - sets inference config
+    # 2. generate(seed, image_path, prompt, negative_prompt, save_result_path) - runs generation
     output = None
     last_error = None
     
     # Save PIL Image to temporary file for image_path parameter
-    temp_file = None
+    temp_input_file = None
+    temp_output_file = None
     try:
-        # Create temporary file for image
-        temp_fd, temp_path = tempfile.mkstemp(suffix='.jpg')
+        # Create temporary file for input image
+        temp_fd, temp_input_path = tempfile.mkstemp(suffix='.jpg')
         os.close(temp_fd)
-        processed_image.save(temp_path, format='JPEG', quality=95)
-        temp_file = temp_path
+        processed_image.save(temp_input_path, format='JPEG', quality=95)
+        temp_input_file = temp_input_path
         
-        # Pattern 1: Correct LightX2V API - create_generator() then generate()
-        # Try with target_width/target_height and sample_guide_scale (from config JSON)
+        # Create temporary file for output image
+        temp_fd2, temp_output_path = tempfile.mkstemp(suffix='.png')
+        os.close(temp_fd2)
+        temp_output_file = temp_output_path
+        
+        # LightX2V API: create_generator() then generate()
         if hasattr(pipeline, 'create_generator') and hasattr(pipeline, 'generate'):
-            # Try different parameter name combinations
-            param_combinations = [
-                # Combination 1: target_width/target_height with sample_guide_scale
-                {
-                    'create_gen': {
-                        'infer_steps': num_inference_steps,
-                        'target_width': width,
-                        'target_height': height,
-                        'sample_guide_scale': guidance_scale
-                    },
-                    'generate': {
-                        'generator': None,  # Will be set
-                        'prompt': prompt,
-                        'image_path': temp_path,
-                        'seed': 42
-                    }
-                },
-                # Combination 2: width/height with guidance_scale
-                {
-                    'create_gen': {
-                        'infer_steps': num_inference_steps,
-                        'width': width,
-                        'height': height,
-                        'guidance_scale': guidance_scale
-                    },
-                    'generate': {
-                        'generator': None,
-                        'prompt': prompt,
-                        'image_path': temp_path,
-                        'seed': 42
-                    }
-                },
-                # Combination 3: target_width/target_height with guidance_scale
-                {
-                    'create_gen': {
-                        'infer_steps': num_inference_steps,
-                        'target_width': width,
-                        'target_height': height,
-                        'guidance_scale': guidance_scale
-                    },
-                    'generate': {
-                        'generator': None,
-                        'prompt': prompt,
-                        'image_path': temp_path,
-                        'seed': 42
-                    }
-                },
-            ]
-            
-            for combo in param_combinations:
-                if output is not None:
-                    break
-                try:
-                    gen_params = combo['create_gen'].copy()
-                    generator = pipeline.create_generator(**gen_params)
-                    
-                    gen_params_call = combo['generate'].copy()
-                    gen_params_call['generator'] = generator
-                    output = pipeline.generate(**gen_params_call)
-                    break
-                except Exception as e:
-                    last_error = e
-                    # Try without generator parameter
-                    try:
-                        gen_params = combo['create_gen'].copy()
-                        generator = pipeline.create_generator(**gen_params)
-                        
-                        gen_params_call = combo['generate'].copy()
-                        gen_params_call.pop('generator', None)
-                        output = pipeline.generate(**gen_params_call)
-                        break
-                    except Exception as e2:
-                        last_error = e2
-                        # Try with image parameter instead of image_path
-                        try:
-                            gen_params = combo['create_gen'].copy()
-                            generator = pipeline.create_generator(**gen_params)
-                            
-                            gen_params_call = combo['generate'].copy()
-                            gen_params_call.pop('image_path', None)
-                            gen_params_call['image'] = processed_image
-                            gen_params_call['generator'] = generator
-                            output = pipeline.generate(**gen_params_call)
-                            break
-                        except Exception as e3:
-                            last_error = e3
-                            continue
-        
-        # Pattern 2: Try direct generate() without create_generator (if supported)
-        if output is None and hasattr(pipeline, 'generate'):
-            direct_param_combinations = [
-                {
-                    'prompt': prompt,
-                    'image_path': temp_path,
-                    'infer_steps': num_inference_steps,
-                    'target_width': width,
-                    'target_height': height,
-                    'sample_guide_scale': guidance_scale,
-                    'seed': 42
-                },
-                {
-                    'prompt': prompt,
-                    'image_path': temp_path,
-                    'infer_steps': num_inference_steps,
-                    'width': width,
-                    'height': height,
-                    'guidance_scale': guidance_scale,
-                    'seed': 42
-                },
-                {
-                    'prompt': prompt,
-                    'image': processed_image,
-                    'infer_steps': num_inference_steps,
-                    'target_width': width,
-                    'target_height': height,
-                    'sample_guide_scale': guidance_scale,
-                    'seed': 42
-                },
-                {
-                    'prompt': prompt,
-                    'image': processed_image,
-                    'infer_steps': num_inference_steps,
-                    'width': width,
-                    'height': height,
-                    'guidance_scale': guidance_scale,
-                    'seed': 42
-                },
-            ]
-            
-            for params in direct_param_combinations:
-                try:
-                    output = pipeline.generate(**params)
-                    break
-                except Exception as e:
-                    if last_error is None:
-                        last_error = e
-                    continue
-    finally:
-        # Clean up temporary file
-        if temp_file and os.path.exists(temp_file):
+            # Step 1: Configure generator with inference parameters
+            # Based on documentation: create_generator(infer_steps, height, width, guidance_scale)
             try:
-                os.unlink(temp_file)
+                pipeline.create_generator(
+                    infer_steps=num_inference_steps,
+                    height=height,
+                    width=width,
+                    guidance_scale=guidance_scale
+                )
+                
+                # Step 2: Generate with input image and prompt
+                # Based on documentation: generate(seed, image_path, prompt, save_result_path)
+                output = pipeline.generate(
+                    seed=42,
+                    image_path=temp_input_path,
+                    prompt=prompt,
+                    negative_prompt="blurry, low quality, distorted, artifacts",
+                    save_result_path=temp_output_path
+                )
+            except Exception as e:
+                last_error = e
+                # Try without save_result_path
+                try:
+                    pipeline.create_generator(
+                        infer_steps=num_inference_steps,
+                        height=height,
+                        width=width,
+                        guidance_scale=guidance_scale
+                    )
+                    output = pipeline.generate(
+                        seed=42,
+                        image_path=temp_input_path,
+                        prompt=prompt,
+                        negative_prompt="blurry, low quality, distorted, artifacts"
+                    )
+                except Exception as e2:
+                    last_error = e2
+                    # Try with minimal parameters
+                    try:
+                        pipeline.create_generator(
+                            infer_steps=num_inference_steps
+                        )
+                        output = pipeline.generate(
+                            seed=42,
+                            image_path=temp_input_path,
+                            prompt=prompt
+                        )
+                    except Exception as e3:
+                        last_error = e3
+        
+        # If output is None but save_result_path was used, load from file
+        if output is None and temp_output_file and os.path.exists(temp_output_file):
+            file_size = os.path.getsize(temp_output_file)
+            if file_size > 0:
+                output = Image.open(temp_output_file)
+                
+    finally:
+        # Clean up temporary input file
+        if temp_input_file and os.path.exists(temp_input_file):
+            try:
+                os.unlink(temp_input_file)
             except Exception:
                 pass
+        # Keep output file until we've processed it (cleanup after extraction)
     
     if output is None:
         error_msg = str(last_error) if last_error else "Unknown error"
@@ -291,25 +218,47 @@ def extract_outfit(
         )
     
     # Extract image from output
-    # LightX2V generate() typically returns a dict with 'images' key or list
-    if isinstance(output, dict):
-        result_image = output.get("images", output.get("image"))
-        if result_image is None:
-            raise ValueError("Output dict does not contain 'images' or 'image' key")
-        if isinstance(result_image, list):
-            result_image = result_image[0]
-    elif isinstance(output, list):
-        result_image = output[0]
-    else:
-        result_image = output
+    result_image = None
     
-    # Ensure result is PIL Image
-    if not isinstance(result_image, Image.Image):
-        if hasattr(result_image, 'images'):
-            result_image = result_image.images[0]
-        elif hasattr(result_image, 'image'):
-            result_image = result_image.image
-        else:
-            raise ValueError(f"Unexpected output format from pipeline: {type(result_image)}")
+    # If output is already a PIL Image
+    if isinstance(output, Image.Image):
+        result_image = output
+    # LightX2V generate() may return a dict with 'images' key or list
+    elif isinstance(output, dict):
+        result_image = output.get("images", output.get("image", output.get("result")))
+        if result_image is None:
+            # Try to find any image-like value in the dict
+            for key, val in output.items():
+                if isinstance(val, Image.Image):
+                    result_image = val
+                    break
+                elif isinstance(val, list) and len(val) > 0 and isinstance(val[0], Image.Image):
+                    result_image = val[0]
+                    break
+        if isinstance(result_image, list) and len(result_image) > 0:
+            result_image = result_image[0]
+    elif isinstance(output, list) and len(output) > 0:
+        result_image = output[0]
+    elif hasattr(output, 'images'):
+        result_image = output.images[0] if isinstance(output.images, list) else output.images
+    elif hasattr(output, 'image'):
+        result_image = output.image
+    
+    # If still not a PIL Image, try to load from output file
+    if result_image is None or not isinstance(result_image, Image.Image):
+        if temp_output_file and os.path.exists(temp_output_file):
+            file_size = os.path.getsize(temp_output_file)
+            if file_size > 0:
+                result_image = Image.open(temp_output_file).copy()
+    
+    # Clean up output file now
+    if temp_output_file and os.path.exists(temp_output_file):
+        try:
+            os.unlink(temp_output_file)
+        except Exception:
+            pass
+    
+    if result_image is None or not isinstance(result_image, Image.Image):
+        raise ValueError(f"Unexpected output format from pipeline: {type(output)}. Could not extract PIL Image.")
     
     return postprocess_image(result_image, ensure_white_bg=True)
