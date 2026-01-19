@@ -41,8 +41,9 @@ def load_model(
         
         # LightX2V requires: task, model_path, model_cls
         # Signature: LightX2VPipeline(task, model_path, model_cls, ...)
-        # For Qwen Image Edit, try common task names and model classes
-        task_options = ["image_edit", "image-edit", "qwen_image_edit", "edit", "img_edit"]
+        # For Qwen Image Edit, use 'i2i' (image-to-image) task
+        # Supported tasks: t2v (text-to-video), i2v (image-to-video), t2i (text-to-image), i2i (image-to-image)
+        task_options = ["i2i", "t2i", "image_edit", "image-edit"]
         
         logger.info(f"Loading model from: {model_path}")
         logger.info(f"Using device: {device}")
@@ -98,7 +99,7 @@ def load_model(
                 from lightx2v.models import QwenImageEditPipeline
                 logger.info("Trying with imported QwenImageEditPipeline class...")
                 pipeline = LightX2VPipeline(
-                    task="image_edit",
+                    task="i2i",  # Use i2i for image-to-image editing
                     model_path=model_path,
                     model_cls=QwenImageEditPipeline
                 )
