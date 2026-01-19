@@ -84,31 +84,40 @@ else
     echo -e "${YELLOW}PyTorch not installed or CUDA check failed${NC}"
 fi
 
-# Verify LightX2V framework (should be pre-installed in container)
-echo -e "\n${GREEN}Checking LightX2V framework...${NC}"
+# Reinstall LightX2V from pinned commit to avoid breaking changes
+# IMPORTANT: The container's pre-installed LightX2V may have breaking changes
+# Commit 7651b0f is the last known working version for i2i tasks
+echo -e "\n${GREEN}Installing LightX2V (pinned to commit 7651b0f to avoid breaking changes)...${NC}"
+
+# Remove existing LightX2V installation
+echo -e "${YELLOW}Removing existing LightX2V installation...${NC}"
+pip uninstall -y lightx2v 2>/dev/null || true
+
+# Clone and install from pinned commit
+LIGHTX2V_DIR="/workspace/LightX2V"
+if [ -d "$LIGHTX2V_DIR" ]; then
+    echo -e "${YELLOW}Removing existing LightX2V directory...${NC}"
+    rm -rf "$LIGHTX2V_DIR"
+fi
+
+echo -e "${GREEN}Cloning LightX2V repository...${NC}"
+git clone https://github.com/ModelTC/LightX2V.git "$LIGHTX2V_DIR"
+
+echo -e "${GREEN}Checking out pinned commit 7651b0f...${NC}"
+cd "$LIGHTX2V_DIR"
+git checkout 7651b0f
+
+echo -e "${GREEN}Installing LightX2V from pinned commit...${NC}"
+pip install -v -e .
+
+cd "$SCRIPT_DIR"
+
+# Verify installation
 if python3 -c "import lightx2v" 2>/dev/null; then
-    echo -e "${GREEN}LightX2V framework is available${NC}"
-    python3 -c "import lightx2v; print('LightX2V version:', getattr(lightx2v, '__version__', 'unknown'))" 2>/dev/null || echo "Version info not available"
+    echo -e "${GREEN}LightX2V framework installed successfully from pinned commit${NC}"
 else
-    echo -e "${YELLOW}LightX2V framework not found. Attempting to install...${NC}"
-    
-    # Try installing from GitHub (common installation method)
-    echo -e "${YELLOW}Installing LightX2V from GitHub...${NC}"
-    if python3 -m pip install git+https://github.com/ModelTC/LightX2V.git 2>/dev/null; then
-        echo -e "${GREEN}LightX2V installed successfully from GitHub${NC}"
-    else
-        echo -e "${YELLOW}GitHub installation failed. Trying PyPI...${NC}"
-        if python3 -m pip install lightx2v 2>/dev/null; then
-            echo -e "${GREEN}LightX2V installed successfully from PyPI${NC}"
-        else
-            echo -e "${RED}Failed to install LightX2V automatically${NC}"
-            echo -e "${YELLOW}Please install LightX2V manually using one of these methods:${NC}"
-            echo "  1. pip install git+https://github.com/ModelTC/LightX2V.git"
-            echo "  2. pip install lightx2v"
-            echo "  3. Check LightX2V documentation for container-specific installation"
-            echo -e "${YELLOW}Note: The API will fail to start without LightX2V installed.${NC}"
-        fi
-    fi
+    echo -e "${RED}Failed to install LightX2V${NC}"
+    exit 1
 fi
 
 # Create necessary directories
