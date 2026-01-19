@@ -115,71 +115,76 @@ def extract_outfit(
     if width is None:
         width = processed_image.width
     
-    # Run inference using LightX2V generate method
-    # LightX2VPipeline uses generate() method with specific parameter names
-    # Try different parameter name combinations for input image
-    parameter_combinations = [
-        # Pattern 1: input_image parameter
-        {
-            'prompt': prompt,
-            'input_image': processed_image,
-            'num_inference_steps': num_inference_steps,
-            'guidance_scale': guidance_scale,
-            'height': height,
-            'width': width
-        },
-        # Pattern 2: img parameter
-        {
-            'prompt': prompt,
-            'img': processed_image,
-            'num_inference_steps': num_inference_steps,
-            'guidance_scale': guidance_scale,
-        },
-        # Pattern 3: input_img parameter
-        {
-            'prompt': prompt,
-            'input_img': processed_image,
-            'steps': num_inference_steps,
-            'guidance': guidance_scale,
-        },
-        # Pattern 4: source_image parameter
-        {
-            'prompt': prompt,
-            'source_image': processed_image,
-            'num_inference_steps': num_inference_steps,
-            'guidance_scale': guidance_scale,
-        },
-        # Pattern 5: Just prompt and image (minimal)
-        {
-            'prompt': prompt,
-            'image': processed_image,
-        },
-    ]
-    
+    # Run inference using LightX2V
+    # LightX2V may require create_generator() first, then generate()
     output = None
     last_error = None
     
-    if hasattr(pipeline, 'generate'):
-        for i, params in enumerate(parameter_combinations, 1):
+    # Try Pattern 1: Use create_generator() first, then generate()
+    if hasattr(pipeline, 'create_generator'):
+        try:
+            generator = pipeline.create_generator(
+                prompt=prompt,
+                image=processed_image,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                height=height,
+                width=width
+            )
+            output = pipeline.generate(generator=generator)
+        except TypeError:
+            # Try without image in create_generator
+            try:
+                generator = pipeline.create_generator(
+                    prompt=prompt,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    height=height,
+                    width=width
+                )
+                output = pipeline.generate(generator=generator, image=processed_image)
+            except Exception as e:
+                last_error = e
+    
+    # Try Pattern 2: Direct generate() with different parameter names
+    if output is None and hasattr(pipeline, 'generate'):
+        parameter_combinations = [
+            # Try input_image, img, input_img, source_image
+            {'prompt': prompt, 'input_image': processed_image, 'num_inference_steps': num_inference_steps, 'guidance_scale': guidance_scale},
+            {'prompt': prompt, 'img': processed_image, 'num_inference_steps': num_inference_steps, 'guidance_scale': guidance_scale},
+            {'prompt': prompt, 'input_img': processed_image, 'steps': num_inference_steps, 'guidance': guidance_scale},
+            {'prompt': prompt, 'source_image': processed_image, 'num_inference_steps': num_inference_steps},
+            # Try with seed parameter
+            {'prompt': prompt, 'input_image': processed_image, 'seed': 42, 'num_inference_steps': num_inference_steps},
+        ]
+        
+        for params in parameter_combinations:
             try:
                 output = pipeline.generate(**params)
                 break
-            except TypeError as e:
+            except (TypeError, ValueError) as e:
                 last_error = e
                 continue
-            except Exception as e:
-                last_error = e
-                # If it's not a TypeError, might be a different issue, try next
-                continue
-        
-        if output is None:
-            raise RuntimeError(
-                f"Failed to generate image. Tried {len(parameter_combinations)} parameter combinations. "
-                f"Last error: {last_error}. "
-                f"Please check LightX2V documentation for generate() method parameters."
-            )
-    else:
-        raise RuntimeError("Pipeline does not have generate() method")
+    
+    # Try Pattern 3: Set image via pipeline method, then generate
+    if output is None and hasattr(pipeline, 'set_image') or hasattr(pipeline, 'set_input_image'):
+        try:
+            if hasattr(pipeline, 'set_image'):
+                pipeline.set_image(processed_image)
+            elif hasattr(pipeline, 'set_input_image'):
+                pipeline.set_input_image(processed_image)
+            
+            output = pipeline.generate(prompt=prompt, num_inference_steps=num_inference_steps, guidance_scale=guidance_scale)
+        except Exception as e:
+            last_error = e
+    
+    if output is None:
+        raise RuntimeError(
+            f"Failed to generate image. Tried multiple approaches. "
+            f"Last error: {last_error}. "
+            f"Pipeline methods available: {[m for m in dir(pipeline) if not m.startswith('_') and callable(getattr(pipeline, m, None))]}. "
+            f"Please check LightX2V documentation for image editing task API."
+        )
     
     # Extract image from output
     # LightX2V generate() typically returns a dict with 'images' key or list
