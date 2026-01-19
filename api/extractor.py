@@ -138,40 +138,25 @@ def extract_outfit(
         os.close(temp_fd2)
         temp_output_file = temp_output_path
         
+        # Define negative prompt - required by LightX2V generate()
+        negative_prompt = "blurry, low quality, distorted, artifacts, deformed, bad anatomy"
+        
         # Try Pattern 1: Call generate() directly without create_generator()
         # The config is already set during pipeline initialization
+        # Note: negative_prompt and save_result_path are REQUIRED arguments
         if hasattr(pipeline, 'generate'):
             try:
                 output = pipeline.generate(
                     seed=42,
                     image_path=temp_input_path,
                     prompt=prompt,
-                    negative_prompt="blurry, low quality, distorted, artifacts",
+                    negative_prompt=negative_prompt,
                     save_result_path=temp_output_path
                 )
             except Exception as e:
                 last_error = e
-                # Try without save_result_path
-                try:
-                    output = pipeline.generate(
-                        seed=42,
-                        image_path=temp_input_path,
-                        prompt=prompt,
-                        negative_prompt="blurry, low quality, distorted, artifacts"
-                    )
-                except Exception as e2:
-                    last_error = e2
-                    # Try with minimal parameters
-                    try:
-                        output = pipeline.generate(
-                            seed=42,
-                            image_path=temp_input_path,
-                            prompt=prompt
-                        )
-                    except Exception as e3:
-                        last_error = e3
         
-        # Try Pattern 2: Use set_infer_config_json if direct generate failed
+        # Try Pattern 2: Use set_infer_config_json then generate
         if output is None and hasattr(pipeline, 'set_infer_config_json') and hasattr(pipeline, 'generate'):
             try:
                 # Set config via JSON
@@ -186,7 +171,7 @@ def extract_outfit(
                     seed=42,
                     image_path=temp_input_path,
                     prompt=prompt,
-                    negative_prompt="blurry, low quality, distorted, artifacts",
+                    negative_prompt=negative_prompt,
                     save_result_path=temp_output_path
                 )
             except Exception as e:
@@ -207,7 +192,7 @@ def extract_outfit(
                     seed=42,
                     image_path=temp_input_path,
                     prompt=prompt,
-                    negative_prompt="blurry, low quality, distorted, artifacts",
+                    negative_prompt=negative_prompt,
                     save_result_path=temp_output_path
                 )
             except Exception as e:
