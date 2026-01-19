@@ -42,7 +42,7 @@ def load_model(
         logger.info(f"Using device: {device}")
         
         # LightX2V uses constructor initialization
-        # Try different initialization patterns
+        # Try different initialization patterns (without device parameter)
         initialization_patterns = [
             # Pattern 1: model_path as first positional argument
             lambda: LightX2VPipeline(model_path),
@@ -50,10 +50,10 @@ def load_model(
             lambda: LightX2VPipeline(model_path=model_path),
             # Pattern 3: model_id keyword argument
             lambda: LightX2VPipeline(model_id=model_path),
-            # Pattern 4: With device parameter
-            lambda: LightX2VPipeline(model_path, device=device),
-            # Pattern 5: model_path and device as keywords
-            lambda: LightX2VPipeline(model_path=model_path, device=device),
+            # Pattern 4: Try with cache_dir
+            lambda: LightX2VPipeline(model_path, cache_dir=cache_dir),
+            # Pattern 5: model_path and cache_dir as keywords
+            lambda: LightX2VPipeline(model_path=model_path, cache_dir=cache_dir),
         ]
         
         pipeline = None
@@ -67,11 +67,11 @@ def load_model(
                 break
             except TypeError as e:
                 last_error = e
-                logger.debug(f"Pattern {i} failed: {e}")
+                logger.info(f"Pattern {i} failed (TypeError): {e}")
                 continue
             except Exception as e:
                 last_error = e
-                logger.warning(f"Pattern {i} raised unexpected error: {e}")
+                logger.info(f"Pattern {i} failed: {type(e).__name__}: {e}")
                 continue
         
         if pipeline is None:
