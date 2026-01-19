@@ -2,6 +2,8 @@
 
 from PIL import Image
 import numpy as np
+import tempfile
+import os
 from typing import Optional, Any
 
 
@@ -116,67 +118,106 @@ def extract_outfit(
         width = processed_image.width
     
     # Run inference using LightX2V
-    # LightX2V may require create_generator() first, then generate()
+    # Correct API pattern: create_generator() sets generation params, generate() takes inputs
     output = None
     last_error = None
     
-    # Try Pattern 1: Use create_generator() first, then generate()
-    if hasattr(pipeline, 'create_generator'):
-        try:
-            generator = pipeline.create_generator(
-                prompt=prompt,
-                image=processed_image,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                height=height,
-                width=width
-            )
-            output = pipeline.generate(generator=generator)
-        except TypeError:
-            # Try without image in create_generator
+    # Save PIL Image to temporary file for image_path parameter
+    temp_file = None
+    try:
+        # Create temporary file for image
+        temp_fd, temp_path = tempfile.mkstemp(suffix='.jpg')
+        os.close(temp_fd)
+        processed_image.save(temp_path, format='JPEG', quality=95)
+        temp_file = temp_path
+        
+        # Pattern 1: Correct LightX2V API - create_generator() then generate()
+        if hasattr(pipeline, 'create_generator') and hasattr(pipeline, 'generate'):
             try:
+                # create_generator() sets generation parameters (no prompt/image)
                 generator = pipeline.create_generator(
-                    prompt=prompt,
-                    num_inference_steps=num_inference_steps,
+                    infer_steps=num_inference_steps,  # Note: infer_steps, not num_inference_steps
                     guidance_scale=guidance_scale,
                     height=height,
                     width=width
                 )
-                output = pipeline.generate(generator=generator, image=processed_image)
+                # generate() takes the actual inputs (prompt, image_path)
+                output = pipeline.generate(
+                    generator=generator,
+                    prompt=prompt,
+                    image_path=temp_path,
+                    seed=42
+                )
             except Exception as e:
                 last_error = e
-    
-    # Try Pattern 2: Direct generate() with different parameter names
-    if output is None and hasattr(pipeline, 'generate'):
-        parameter_combinations = [
-            # Try input_image, img, input_img, source_image
-            {'prompt': prompt, 'input_image': processed_image, 'num_inference_steps': num_inference_steps, 'guidance_scale': guidance_scale},
-            {'prompt': prompt, 'img': processed_image, 'num_inference_steps': num_inference_steps, 'guidance_scale': guidance_scale},
-            {'prompt': prompt, 'input_img': processed_image, 'steps': num_inference_steps, 'guidance': guidance_scale},
-            {'prompt': prompt, 'source_image': processed_image, 'num_inference_steps': num_inference_steps},
-            # Try with seed parameter
-            {'prompt': prompt, 'input_image': processed_image, 'seed': 42, 'num_inference_steps': num_inference_steps},
-        ]
+                # Try without generator parameter (some versions might not need it)
+                try:
+                    generator = pipeline.create_generator(
+                        infer_steps=num_inference_steps,
+                        guidance_scale=guidance_scale,
+                        height=height,
+                        width=width
+                    )
+                    output = pipeline.generate(
+                        prompt=prompt,
+                        image_path=temp_path,
+                        seed=42
+                    )
+                except Exception as e2:
+                    last_error = e2
+                    # Try with image parameter instead of image_path (PIL Image)
+                    try:
+                        generator = pipeline.create_generator(
+                            infer_steps=num_inference_steps,
+                            guidance_scale=guidance_scale,
+                            height=height,
+                            width=width
+                        )
+                        output = pipeline.generate(
+                            generator=generator,
+                            prompt=prompt,
+                            image=processed_image,
+                            seed=42
+                        )
+                    except Exception as e3:
+                        last_error = e3
         
-        for params in parameter_combinations:
+        # Pattern 2: Try direct generate() without create_generator (if supported)
+        if output is None and hasattr(pipeline, 'generate'):
             try:
-                output = pipeline.generate(**params)
-                break
-            except (TypeError, ValueError) as e:
-                last_error = e
-                continue
-    
-    # Try Pattern 3: Set image via pipeline method, then generate
-    if output is None and hasattr(pipeline, 'set_image') or hasattr(pipeline, 'set_input_image'):
-        try:
-            if hasattr(pipeline, 'set_image'):
-                pipeline.set_image(processed_image)
-            elif hasattr(pipeline, 'set_input_image'):
-                pipeline.set_input_image(processed_image)
-            
-            output = pipeline.generate(prompt=prompt, num_inference_steps=num_inference_steps, guidance_scale=guidance_scale)
-        except Exception as e:
-            last_error = e
+                output = pipeline.generate(
+                    prompt=prompt,
+                    image_path=temp_path,
+                    infer_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    height=height,
+                    width=width,
+                    seed=42
+                )
+            except Exception as e:
+                if last_error is None:
+                    last_error = e
+                # Try with image parameter
+                try:
+                    output = pipeline.generate(
+                        prompt=prompt,
+                        image=processed_image,
+                        infer_steps=num_inference_steps,
+                        guidance_scale=guidance_scale,
+                        height=height,
+                        width=width,
+                        seed=42
+                    )
+                except Exception as e2:
+                    if last_error is None:
+                        last_error = e2
+    finally:
+        # Clean up temporary file
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.unlink(temp_file)
+            except Exception:
+                pass
     
     if output is None:
         raise RuntimeError(
