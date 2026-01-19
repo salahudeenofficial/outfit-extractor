@@ -118,9 +118,8 @@ def extract_outfit(
         width = processed_image.width
     
     # Run inference using LightX2V
-    # Correct API pattern from LightX2V documentation:
-    # 1. create_generator(infer_steps, height, width, guidance_scale, ...) - sets inference config
-    # 2. generate(seed, image_path, prompt, negative_prompt, save_result_path) - runs generation
+    # The pipeline config is already set during initialization, so we can call generate() directly
+    # If create_generator() causes KeyError, skip it and use the pre-configured settings
     output = None
     last_error = None
     
@@ -139,20 +138,10 @@ def extract_outfit(
         os.close(temp_fd2)
         temp_output_file = temp_output_path
         
-        # LightX2V API: create_generator() then generate()
-        if hasattr(pipeline, 'create_generator') and hasattr(pipeline, 'generate'):
-            # Step 1: Configure generator with inference parameters
-            # Based on documentation: create_generator(infer_steps, height, width, guidance_scale)
+        # Try Pattern 1: Call generate() directly without create_generator()
+        # The config is already set during pipeline initialization
+        if hasattr(pipeline, 'generate'):
             try:
-                pipeline.create_generator(
-                    infer_steps=num_inference_steps,
-                    height=height,
-                    width=width,
-                    guidance_scale=guidance_scale
-                )
-                
-                # Step 2: Generate with input image and prompt
-                # Based on documentation: generate(seed, image_path, prompt, save_result_path)
                 output = pipeline.generate(
                     seed=42,
                     image_path=temp_input_path,
@@ -164,12 +153,6 @@ def extract_outfit(
                 last_error = e
                 # Try without save_result_path
                 try:
-                    pipeline.create_generator(
-                        infer_steps=num_inference_steps,
-                        height=height,
-                        width=width,
-                        guidance_scale=guidance_scale
-                    )
                     output = pipeline.generate(
                         seed=42,
                         image_path=temp_input_path,
@@ -180,9 +163,6 @@ def extract_outfit(
                     last_error = e2
                     # Try with minimal parameters
                     try:
-                        pipeline.create_generator(
-                            infer_steps=num_inference_steps
-                        )
                         output = pipeline.generate(
                             seed=42,
                             image_path=temp_input_path,
@@ -190,6 +170,49 @@ def extract_outfit(
                         )
                     except Exception as e3:
                         last_error = e3
+        
+        # Try Pattern 2: Use set_infer_config_json if direct generate failed
+        if output is None and hasattr(pipeline, 'set_infer_config_json') and hasattr(pipeline, 'generate'):
+            try:
+                # Set config via JSON
+                config = {
+                    "infer_steps": num_inference_steps,
+                    "target_width": width,
+                    "target_height": height,
+                    "sample_guide_scale": guidance_scale
+                }
+                pipeline.set_infer_config_json(config)
+                output = pipeline.generate(
+                    seed=42,
+                    image_path=temp_input_path,
+                    prompt=prompt,
+                    negative_prompt="blurry, low quality, distorted, artifacts",
+                    save_result_path=temp_output_path
+                )
+            except Exception as e:
+                if last_error is None:
+                    last_error = e
+        
+        # Try Pattern 3: Use update() method if available
+        if output is None and hasattr(pipeline, 'update') and hasattr(pipeline, 'generate'):
+            try:
+                # Try update method to set parameters
+                pipeline.update(
+                    infer_steps=num_inference_steps,
+                    target_width=width,
+                    target_height=height,
+                    sample_guide_scale=guidance_scale
+                )
+                output = pipeline.generate(
+                    seed=42,
+                    image_path=temp_input_path,
+                    prompt=prompt,
+                    negative_prompt="blurry, low quality, distorted, artifacts",
+                    save_result_path=temp_output_path
+                )
+            except Exception as e:
+                if last_error is None:
+                    last_error = e
         
         # If output is None but save_result_path was used, load from file
         if output is None and temp_output_file and os.path.exists(temp_output_file):
