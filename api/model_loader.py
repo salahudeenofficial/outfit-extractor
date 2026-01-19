@@ -54,133 +54,59 @@ def load_model(
     try:
         from lightx2v import LightX2VPipeline
         
-        # LightX2V requires: task, model_path, model_cls
-        # Based on working VTON project:
-        # - task: "i2i" (image-to-image)
-        # - model_cls: "qwen-image-edit-2511" (lowercase with dashes!)
-        task_options = ["i2i"]
-        model_cls_options = ["qwen-image-edit-2511", "qwen_image_edit", "QwenImageEditPipeline"]
+        # The correct model_cls for Qwen-Image-Edit is "qwen-image-edit-2511"
+        model_cls = "qwen-image-edit-2511"
+        task = "i2i"
         
         logger.info(f"Loading model from: {model_path}")
         logger.info(f"Using device: {device}")
         
-        pipeline = None
-        last_error = None
+        logger.info(f"Initializing LightX2VPipeline(model_path='{model_path}', model_cls='{model_cls}', task='{task}')")
+        pipeline = LightX2VPipeline(
+            model_path=model_path,
+            model_cls=model_cls,
+            task=task,
+        )
+        logger.info("Pipeline created successfully")
         
-        # Try task/model_cls combinations based on working VTON project
-        runner_initialized = False
-        
-        for task in task_options:
-            if runner_initialized:
-                break
-            for model_cls in model_cls_options:
-                try:
-                    logger.info(f"Trying: LightX2VPipeline(model_path='{model_path}', model_cls='{model_cls}', task='{task}')")
-                    pipeline = LightX2VPipeline(
-                        model_path=model_path,
-                        model_cls=model_cls,
-                        task=task,
-                    )
-                    logger.info(f"Successfully initialized with model_cls='{model_cls}', task='{task}'")
-                    
-                    # Create generator ONCE during startup (from PROBLEMS_FACED.txt)
-                    # Calling create_generator() multiple times causes JSON serialization errors
-                    # Must pass parameters to properly initialize the runner
-                    logger.info("Creating generator (one-time setup with params)...")
-                    
-                    # Get attention mode based on GPU
-                    attn_mode = "torch_sdpa"  # Safe default
-                    try:
-                        import importlib.util
-                        if importlib.util.find_spec("flash_attn") is not None:
-                            attn_mode = "flash_attn2"
-                            logger.info("Using Flash Attention 2")
-                    except Exception:
-                        logger.info("Using PyTorch SDPA attention")
-                    
-                    # Create generator with required parameters (from working VTON project)
-                    logger.info(f"Calling create_generator(attn_mode={attn_mode}, infer_steps=4, guidance_scale=1.0, width=768, height=1024, aspect_ratio='3:4')")
-                    pipeline.create_generator(
-                        attn_mode=attn_mode,
-                        infer_steps=4,  # 4 steps for Lightning model
-                        guidance_scale=1.0,
-                        width=768,
-                        height=1024,
-                        aspect_ratio="3:4",
-                    )
-                    
-                    # Verify runner was created (critical for generate() to work)
-                    if hasattr(pipeline, 'runner') and pipeline.runner is not None:
-                        logger.info("Generator created successfully - runner initialized")
-                        runner_initialized = True
-                        break
-                    else:
-                        logger.warning(f"create_generator() completed but runner not initialized for model_cls='{model_cls}'")
-                        pipeline = None  # Reset so we try the next option
-                        continue
-                        
-                except Exception as e:
-                    last_error = e
-                    logger.warning(f"Failed with model_cls='{model_cls}', task='{task}': {e}")
-                    pipeline = None  # Reset on failure
-                    continue
-        
-        # If still not initialized, try without model_cls (auto-detect)
-        if not runner_initialized:
-            try:
-                logger.info(f"Trying: LightX2VPipeline(model_path='{model_path}', task='i2i') without model_cls")
-                pipeline = LightX2VPipeline(
-                    model_path=model_path,
-                    task="i2i",
-                )
-                logger.info("Successfully initialized without model_cls")
+        # Enable CPU offload to manage GPU memory (prevents OOM errors)
+        # The model needs ~44GB but offloading allows parts to stay on CPU
+        logger.info("Enabling CPU offload to manage GPU memory...")
+        pipeline.enable_offload()
                 
-                # Create generator with required parameters
-                logger.info("Creating generator with params...")
-                attn_mode = "torch_sdpa"
-                try:
-                    import importlib.util
-                    if importlib.util.find_spec("flash_attn") is not None:
-                        attn_mode = "flash_attn2"
-                except Exception:
-                    pass
-                
-                logger.info(f"Calling create_generator(attn_mode={attn_mode}, ...)")
-                pipeline.create_generator(
-                    attn_mode=attn_mode,
-                    infer_steps=4,
-                    guidance_scale=1.0,
-                    width=768,
-                    height=1024,
-                    aspect_ratio="3:4",
-                )
-                
-                # Verify runner was created
-                if hasattr(pipeline, 'runner') and pipeline.runner is not None:
-                    logger.info("Generator created successfully - runner initialized")
-                    runner_initialized = True
-                else:
-                    logger.warning("create_generator() completed but runner not initialized!")
-                    pipeline = None
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Failed without model_cls: {e}")
-                pipeline = None
+        # Create generator ONCE during startup (from PROBLEMS_FACED.txt)
+        # Calling create_generator() multiple times causes JSON serialization errors
+        # Must pass parameters to properly initialize the runner
+        logger.info("Creating generator (one-time setup with params)...")
         
-        if not runner_initialized or pipeline is None:
-            error_msg = (
-                f"Failed to initialize LightX2VPipeline with model_path='{model_path}'. "
-                f"LightX2V requires 'task' and 'model_cls' parameters. "
-                f"Tried tasks: {task_options}. "
-                f"Last error: {last_error}. "
-                f"\n\nLightX2VPipeline signature: (task, model_path, model_cls, ...) "
-                f"\nPlease check LightX2V documentation for Qwen Image Edit task and model_cls values."
-            )
-            raise RuntimeError(error_msg)
+        # Get attention mode based on GPU
+        attn_mode = "torch_sdpa"  # Safe default
+        try:
+            import importlib.util
+            if importlib.util.find_spec("flash_attn") is not None:
+                attn_mode = "flash_attn2"
+                logger.info("Using Flash Attention 2")
+        except Exception:
+            logger.info("Using PyTorch SDPA attention")
         
-        # Device is handled automatically by LightX2V based on CUDA availability
-        logger.info(f"Pipeline initialized successfully")
+        # Create generator with required parameters (from working VTON project)
+        logger.info(f"Calling create_generator(attn_mode={attn_mode}, infer_steps=4, guidance_scale=1.0, width=768, height=1024)")
+        pipeline.create_generator(
+            attn_mode=attn_mode,
+            infer_steps=4,  # 4 steps for Lightning model
+            guidance_scale=1.0,
+            width=768,
+            height=1024,
+            aspect_ratio="3:4",
+        )
         
+        # Verify runner was created (critical for generate() to work)
+        if hasattr(pipeline, 'runner') and pipeline.runner is not None:
+            logger.info("Generator created successfully - runner initialized")
+        else:
+            raise RuntimeError("Pipeline runner not initialized after create_generator()")
+        
+        logger.info("Pipeline initialized successfully")
         return pipeline
         
     except ImportError as e:
