@@ -54,23 +54,17 @@ def load_model(
         
         return pipeline
         
-    except ImportError:
-        # Fallback: try alternative import paths
-        try:
-            from diffusers import DiffusionPipeline
-            # Alternative loading method if LightX2V uses diffusers-compatible API
-            pipeline = DiffusionPipeline.from_pretrained(
-                model_path,
-                cache_dir=cache_dir,
-                torch_dtype=torch.float16,
-                device_map=device
-            )
-            return pipeline
-        except Exception as e:
-            raise ImportError(
-                f"Failed to import LightX2V framework. "
-                f"Ensure LightX2V is installed in the container. Error: {e}"
-            )
+    except ImportError as e:
+        error_msg = (
+            f"Failed to import LightX2V framework. "
+            f"LightX2V is required for this model. "
+            f"Please install it using one of these methods:\n"
+            f"  1. pip install git+https://github.com/ModelTC/LightX2V.git\n"
+            f"  2. pip install lightx2v\n"
+            f"  3. Check LightX2V documentation for container-specific installation\n"
+            f"Original error: {e}"
+        )
+        raise ImportError(error_msg)
     except Exception as e:
         raise RuntimeError(f"Failed to load model: {e}")
 

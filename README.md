@@ -209,7 +209,12 @@ No human present. Only the outfit on white background.
 
 ### Server Issues
 
-- **Model not loading**: Ensure LightX2V framework is available in the container
+- **LightX2V not found**: If LightX2V framework is not installed, run:
+  ```bash
+  pip install git+https://github.com/ModelTC/LightX2V.git
+  ```
+  Or try: `pip install lightx2v`
+- **Model not loading**: Ensure LightX2V framework is installed and CUDA is available
 - **CUDA errors**: Verify GPU is accessible and CUDA is properly configured
 - **Out of memory**: Use a GPU with more VRAM or reduce image size
 - **Connection refused**: Check that port 8000 is exposed and firewall allows connections

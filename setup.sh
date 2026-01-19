@@ -90,9 +90,25 @@ if python3 -c "import lightx2v" 2>/dev/null; then
     echo -e "${GREEN}LightX2V framework is available${NC}"
     python3 -c "import lightx2v; print('LightX2V version:', getattr(lightx2v, '__version__', 'unknown'))" 2>/dev/null || echo "Version info not available"
 else
-    echo -e "${RED}LightX2V framework not found!${NC}"
-    echo -e "${YELLOW}This script assumes LightX2V is pre-installed in the container.${NC}"
-    echo -e "${YELLOW}If it's not available, you may need to install it manually.${NC}"
+    echo -e "${YELLOW}LightX2V framework not found. Attempting to install...${NC}"
+    
+    # Try installing from GitHub (common installation method)
+    echo -e "${YELLOW}Installing LightX2V from GitHub...${NC}"
+    if python3 -m pip install git+https://github.com/ModelTC/LightX2V.git 2>/dev/null; then
+        echo -e "${GREEN}LightX2V installed successfully from GitHub${NC}"
+    else
+        echo -e "${YELLOW}GitHub installation failed. Trying PyPI...${NC}"
+        if python3 -m pip install lightx2v 2>/dev/null; then
+            echo -e "${GREEN}LightX2V installed successfully from PyPI${NC}"
+        else
+            echo -e "${RED}Failed to install LightX2V automatically${NC}"
+            echo -e "${YELLOW}Please install LightX2V manually using one of these methods:${NC}"
+            echo "  1. pip install git+https://github.com/ModelTC/LightX2V.git"
+            echo "  2. pip install lightx2v"
+            echo "  3. Check LightX2V documentation for container-specific installation"
+            echo -e "${YELLOW}Note: The API will fail to start without LightX2V installed.${NC}"
+        fi
+    fi
 fi
 
 # Create necessary directories
