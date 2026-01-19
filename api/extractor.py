@@ -141,18 +141,26 @@ def extract_outfit(
         # Define negative prompt - required by LightX2V generate()
         negative_prompt = "blurry, low quality, distorted, artifacts, deformed, bad anatomy"
         
-        # Try Pattern 1: Use create_generator() to set up pipeline attributes, then generate()
-        # This is required to set aspect_ratio and other internal attributes
-        if hasattr(pipeline, 'create_generator') and hasattr(pipeline, 'generate'):
+        # Pattern: Use set_infer_config_json() for config, then create_generator(), then generate()
+        # set_infer_config_json accepts target_width/target_height
+        # create_generator() sets up internal state (aspect_ratio, etc.)
+        # generate() runs the actual inference
+        if hasattr(pipeline, 'set_infer_config_json') and hasattr(pipeline, 'create_generator') and hasattr(pipeline, 'generate'):
             try:
-                # create_generator() sets up internal pipeline state including aspect_ratio
-                pipeline.create_generator(
-                    infer_steps=num_inference_steps,
-                    height=height,
-                    width=width,
-                    guidance_scale=guidance_scale,
-                    sample_shift=5.0,  # Default value for image editing
-                )
+                # Step 1: Set config via JSON (this accepts target_width/target_height)
+                config = {
+                    "infer_steps": num_inference_steps,
+                    "target_width": width,
+                    "target_height": height,
+                    "sample_guide_scale": guidance_scale,
+                    "sample_shift": 5.0
+                }
+                pipeline.set_infer_config_json(config)
+                
+                # Step 2: Create generator to set up internal state (aspect_ratio, etc.)
+                pipeline.create_generator()
+                
+                # Step 3: Generate
                 output = pipeline.generate(
                     seed=42,
                     image_path=temp_input_path,
@@ -162,64 +170,12 @@ def extract_outfit(
                 )
             except Exception as e:
                 last_error = e
-                # Try with target_width/target_height instead
-                try:
-                    pipeline.create_generator(
-                        infer_steps=num_inference_steps,
-                        target_height=height,
-                        target_width=width,
-                        sample_guide_scale=guidance_scale,
-                        sample_shift=5.0,
-                    )
-                    output = pipeline.generate(
-                        seed=42,
-                        image_path=temp_input_path,
-                        prompt=prompt,
-                        negative_prompt=negative_prompt,
-                        save_result_path=temp_output_path
-                    )
-                except Exception as e2:
-                    last_error = e2
         
-        # Try Pattern 2: Use set_infer_config_json then create_generator then generate
-        if output is None and hasattr(pipeline, 'set_infer_config_json') and hasattr(pipeline, 'generate'):
+        # Fallback: Try with just create_generator() with minimal params
+        if output is None and hasattr(pipeline, 'create_generator') and hasattr(pipeline, 'generate'):
             try:
-                # Set config via JSON first
-                config = {
-                    "infer_steps": num_inference_steps,
-                    "target_width": width,
-                    "target_height": height,
-                    "sample_guide_scale": guidance_scale,
-                    "sample_shift": 5.0
-                }
-                pipeline.set_infer_config_json(config)
-                # Then create_generator to set up internal state
-                if hasattr(pipeline, 'create_generator'):
-                    pipeline.create_generator()
-                output = pipeline.generate(
-                    seed=42,
-                    image_path=temp_input_path,
-                    prompt=prompt,
-                    negative_prompt=negative_prompt,
-                    save_result_path=temp_output_path
-                )
-            except Exception as e:
-                if last_error is None:
-                    last_error = e
-        
-        # Try Pattern 3: Use update() then create_generator() then generate()
-        if output is None and hasattr(pipeline, 'update') and hasattr(pipeline, 'generate'):
-            try:
-                # Try update method to set parameters
-                pipeline.update(
-                    infer_steps=num_inference_steps,
-                    target_width=width,
-                    target_height=height,
-                    sample_guide_scale=guidance_scale,
-                    sample_shift=5.0
-                )
-                if hasattr(pipeline, 'create_generator'):
-                    pipeline.create_generator()
+                # Try create_generator with no args (use defaults from initialization)
+                pipeline.create_generator()
                 output = pipeline.generate(
                     seed=42,
                     image_path=temp_input_path,
