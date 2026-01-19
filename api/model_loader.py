@@ -66,8 +66,28 @@ def load_model(
                     
                     # Create generator ONCE during startup (from PROBLEMS_FACED.txt)
                     # Calling create_generator() multiple times causes JSON serialization errors
-                    logger.info("Creating generator (one-time setup)...")
-                    pipeline.create_generator()
+                    # Must pass parameters to properly initialize the runner
+                    logger.info("Creating generator (one-time setup with params)...")
+                    
+                    # Get attention mode based on GPU
+                    attn_mode = "torch_sdpa"  # Safe default
+                    try:
+                        import importlib.util
+                        if importlib.util.find_spec("flash_attn") is not None:
+                            attn_mode = "flash_attn2"
+                            logger.info("Using Flash Attention 2")
+                    except Exception:
+                        logger.info("Using PyTorch SDPA attention")
+                    
+                    # Create generator with required parameters (from working VTON project)
+                    pipeline.create_generator(
+                        attn_mode=attn_mode,
+                        infer_steps=4,  # 4 steps for Lightning model
+                        guidance_scale=1.0,
+                        width=768,
+                        height=1024,
+                        aspect_ratio="3:4",
+                    )
                     logger.info("Generator created successfully")
                     
                     break
@@ -89,9 +109,24 @@ def load_model(
                 )
                 logger.info("Successfully initialized without model_cls")
                 
-                # Create generator
-                logger.info("Creating generator...")
-                pipeline.create_generator()
+                # Create generator with required parameters
+                logger.info("Creating generator with params...")
+                attn_mode = "torch_sdpa"
+                try:
+                    import importlib.util
+                    if importlib.util.find_spec("flash_attn") is not None:
+                        attn_mode = "flash_attn2"
+                except Exception:
+                    pass
+                
+                pipeline.create_generator(
+                    attn_mode=attn_mode,
+                    infer_steps=4,
+                    guidance_scale=1.0,
+                    width=768,
+                    height=1024,
+                    aspect_ratio="3:4",
+                )
                 logger.info("Generator created successfully")
             except Exception as e:
                 last_error = e
