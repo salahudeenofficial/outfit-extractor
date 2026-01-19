@@ -28,10 +28,25 @@ def load_model(
         cache_dir = os.environ.get("MODEL_CACHE_DIR", "/workspace/models")
     
     if model_path is None:
-        model_path = os.environ.get(
-            "MODEL_PATH",
-            "lightx2v/Qwen-Image-Edit-2511-Lightning"
-        )
+        # Check for local model first, then fall back to HuggingFace Hub
+        local_paths = [
+            "/workspace/models/Qwen-Image-Edit-2511",
+            "/workspace/outfit-extractor/models/Qwen-Image-Edit-2511",
+            "models/Qwen-Image-Edit-2511",
+        ]
+        
+        model_path = os.environ.get("MODEL_PATH")
+        if model_path is None:
+            for local_path in local_paths:
+                if os.path.exists(local_path):
+                    model_path = local_path
+                    logger.info(f"Found local model at: {model_path}")
+                    break
+            
+            if model_path is None:
+                # Fall back to HuggingFace Hub (requires internet)
+                model_path = "Qwen/Qwen-Image-Edit-2511"
+                logger.warning(f"No local model found. Will try to download from HuggingFace: {model_path}")
     
     if device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA is not available. Set device='cpu' or ensure GPU is accessible.")
