@@ -3,7 +3,9 @@
 import os
 import torch
 from typing import Optional
-from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def load_model(
@@ -31,26 +33,66 @@ def load_model(
             "lightx2v/Qwen-Image-Edit-2511-Lightning"
         )
     
-    # Check if CUDA is available
     if device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA is not available. Set device='cpu' or ensure GPU is accessible.")
     
     try:
-        # Import LightX2V pipeline
-        # Note: Actual import may vary based on LightX2V API
-        # This is a placeholder - adjust based on actual LightX2V API
         from lightx2v import LightX2VPipeline
+        logger.info(f"Loading model from: {model_path}")
+        logger.info(f"Using device: {device}")
         
-        # Load the FP8 quantized model
-        pipeline = LightX2VPipeline.from_pretrained(
-            model_path,
-            cache_dir=cache_dir,
-            torch_dtype=torch.float16,  # FP8 models may use float16 wrapper
-            device=device
-        )
+        # LightX2V uses constructor initialization
+        # Try different initialization patterns
+        initialization_patterns = [
+            # Pattern 1: model_path as first positional argument
+            lambda: LightX2VPipeline(model_path),
+            # Pattern 2: model_path keyword argument
+            lambda: LightX2VPipeline(model_path=model_path),
+            # Pattern 3: model_id keyword argument
+            lambda: LightX2VPipeline(model_id=model_path),
+            # Pattern 4: With device parameter
+            lambda: LightX2VPipeline(model_path, device=device),
+            # Pattern 5: model_path and device as keywords
+            lambda: LightX2VPipeline(model_path=model_path, device=device),
+        ]
         
-        if device == "cuda":
-            pipeline = pipeline.to(device)
+        pipeline = None
+        last_error = None
+        
+        for i, init_func in enumerate(initialization_patterns, 1):
+            try:
+                logger.info(f"Trying initialization pattern {i}...")
+                pipeline = init_func()
+                logger.info(f"Successfully initialized pipeline using pattern {i}")
+                break
+            except TypeError as e:
+                last_error = e
+                logger.debug(f"Pattern {i} failed: {e}")
+                continue
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Pattern {i} raised unexpected error: {e}")
+                continue
+        
+        if pipeline is None:
+            # Provide helpful error message
+            error_msg = (
+                f"Failed to initialize LightX2VPipeline with model_path='{model_path}'. "
+                f"Tried {len(initialization_patterns)} different initialization patterns. "
+                f"Last error: {last_error}. "
+                f"Please check LightX2V documentation for the correct initialization API."
+            )
+            raise RuntimeError(error_msg)
+        
+        # Move to device if needed and not already set
+        if device == "cuda" and torch.cuda.is_available():
+            try:
+                if hasattr(pipeline, 'to'):
+                    pipeline = pipeline.to(device)
+                elif hasattr(pipeline, 'cuda'):
+                    pipeline = pipeline.cuda()
+            except Exception as e:
+                logger.warning(f"Could not move pipeline to {device}: {e}")
         
         return pipeline
         
