@@ -40,10 +40,11 @@ def load_model(
         from lightx2v import LightX2VPipeline
         
         # LightX2V requires: task, model_path, model_cls
-        # Signature: LightX2VPipeline(task, model_path, model_cls, ...)
-        # For Qwen Image Edit, use 'i2i' (image-to-image) task
-        # Supported tasks: t2v (text-to-video), i2v (image-to-video), t2i (text-to-image), i2i (image-to-image)
-        task_options = ["i2i", "t2i", "image_edit", "image-edit"]
+        # Based on working VTON project:
+        # - task: "i2i" (image-to-image)
+        # - model_cls: "qwen-image-edit-2511" (lowercase with dashes!)
+        task_options = ["i2i"]
+        model_cls_options = ["qwen-image-edit-2511", "qwen_image_edit", "QwenImageEditPipeline"]
         
         logger.info(f"Loading model from: {model_path}")
         logger.info(f"Using device: {device}")
@@ -51,64 +52,50 @@ def load_model(
         pipeline = None
         last_error = None
         
-        # Try different task names - model_cls might be optional or auto-detected
+        # Try task/model_cls combinations based on working VTON project
         for task in task_options:
-            try:
-                # Pattern 1: Try without model_cls (might be optional)
-                logger.info(f"Trying: LightX2VPipeline(task='{task}', model_path='{model_path}')")
-                pipeline = LightX2VPipeline(task=task, model_path=model_path)
-                logger.info(f"Successfully initialized pipeline with task='{task}'")
-                break
-            except TypeError as e:
-                # If model_cls is required, try with different model_cls values
-                if "model_cls" in str(e) or "required" in str(e).lower():
-                    logger.debug(f"model_cls required, trying with model_cls parameter...")
-                    # Try with model_cls as string
-                    model_cls_options = [
-                        "QwenImageEditPipeline",
-                        "QwenImageEdit",
-                        "QwenImageEdit2511",
-                        "QwenImageEditLightning",
-                    ]
+            for model_cls in model_cls_options:
+                try:
+                    logger.info(f"Trying: LightX2VPipeline(model_path='{model_path}', model_cls='{model_cls}', task='{task}')")
+                    pipeline = LightX2VPipeline(
+                        model_path=model_path,
+                        model_cls=model_cls,
+                        task=task,
+                    )
+                    logger.info(f"Successfully initialized with model_cls='{model_cls}', task='{task}'")
                     
-                    for model_cls in model_cls_options:
-                        try:
-                            logger.info(f"Trying: LightX2VPipeline(task='{task}', model_path='{model_path}', model_cls='{model_cls}')")
-                            pipeline = LightX2VPipeline(task=task, model_path=model_path, model_cls=model_cls)
-                            logger.info(f"Successfully initialized with task='{task}', model_cls='{model_cls}'")
-                            break
-                        except Exception as e2:
-                            last_error = e2
-                            logger.debug(f"Failed with model_cls='{model_cls}': {e2}")
-                            continue
+                    # Create generator ONCE during startup (from PROBLEMS_FACED.txt)
+                    # Calling create_generator() multiple times causes JSON serialization errors
+                    logger.info("Creating generator (one-time setup)...")
+                    pipeline.create_generator()
+                    logger.info("Generator created successfully")
                     
-                    if pipeline is not None:
-                        break
-                else:
+                    break
+                except Exception as e:
                     last_error = e
-                    logger.debug(f"Failed with task='{task}': {e}")
+                    logger.debug(f"Failed with model_cls='{model_cls}', task='{task}': {e}")
                     continue
-            except Exception as e:
-                last_error = e
-                logger.debug(f"Failed with task='{task}': {type(e).__name__}: {e}")
-                continue
+            
+            if pipeline is not None:
+                break
         
-        # If still None, try importing model class directly
+        # If still None, try without model_cls (auto-detect)
         if pipeline is None:
             try:
-                from lightx2v.models import QwenImageEditPipeline
-                logger.info("Trying with imported QwenImageEditPipeline class...")
+                logger.info(f"Trying: LightX2VPipeline(model_path='{model_path}', task='i2i') without model_cls")
                 pipeline = LightX2VPipeline(
-                    task="i2i",  # Use i2i for image-to-image editing
                     model_path=model_path,
-                    model_cls=QwenImageEditPipeline
+                    task="i2i",
                 )
-                logger.info("Successfully initialized with imported model class")
-            except ImportError:
-                logger.debug("Could not import QwenImageEditPipeline")
+                logger.info("Successfully initialized without model_cls")
+                
+                # Create generator
+                logger.info("Creating generator...")
+                pipeline.create_generator()
+                logger.info("Generator created successfully")
             except Exception as e:
                 last_error = e
-                logger.debug(f"Failed with imported model class: {e}")
+                logger.debug(f"Failed without model_cls: {e}")
         
         if pipeline is None:
             error_msg = (
