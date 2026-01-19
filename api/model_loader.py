@@ -28,8 +28,14 @@ def load_model(
         cache_dir = os.environ.get("MODEL_CACHE_DIR", "/workspace/models")
     
     if model_path is None:
-        # Check for local model first, then fall back to HuggingFace Hub
-        local_paths = [
+        # Check for local FP8 Lightning model first (much smaller, ~15GB vs ~44GB)
+        # Then fall back to full precision model if FP8 not available
+        fp8_local_paths = [
+            "/workspace/models/Qwen-Image-Edit-2511-Lightning",
+            "/workspace/outfit-extractor/models/Qwen-Image-Edit-2511-Lightning",
+            "models/Qwen-Image-Edit-2511-Lightning",
+        ]
+        full_local_paths = [
             "/workspace/models/Qwen-Image-Edit-2511",
             "/workspace/outfit-extractor/models/Qwen-Image-Edit-2511",
             "models/Qwen-Image-Edit-2511",
@@ -37,16 +43,25 @@ def load_model(
         
         model_path = os.environ.get("MODEL_PATH")
         if model_path is None:
-            for local_path in local_paths:
+            # Prefer FP8 Lightning model (smaller, faster)
+            for local_path in fp8_local_paths:
                 if os.path.exists(local_path):
                     model_path = local_path
-                    logger.info(f"Found local model at: {model_path}")
+                    logger.info(f"Found local FP8 Lightning model at: {model_path}")
                     break
             
+            # Fall back to full precision model
             if model_path is None:
-                # Fall back to HuggingFace Hub (requires internet)
-                model_path = "Qwen/Qwen-Image-Edit-2511"
-                logger.warning(f"No local model found. Will try to download from HuggingFace: {model_path}")
+                for local_path in full_local_paths:
+                    if os.path.exists(local_path):
+                        model_path = local_path
+                        logger.warning(f"FP8 model not found. Using full precision model at: {model_path}")
+                        break
+            
+            if model_path is None:
+                # Fall back to HuggingFace Hub FP8 Lightning model
+                model_path = "lightx2v/Qwen-Image-Edit-2511-Lightning"
+                logger.warning(f"No local model found. Will try to download FP8 from HuggingFace: {model_path}")
     
     if device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA is not available. Set device='cpu' or ensure GPU is accessible.")
@@ -61,6 +76,11 @@ def load_model(
         logger.info(f"Loading model from: {model_path}")
         logger.info(f"Using device: {device}")
         
+        # Clear CUDA cache before loading to free any stale memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            logger.info(f"CUDA memory before load: {torch.cuda.memory_allocated()/1e9:.2f}GB allocated")
+        
         logger.info(f"Initializing LightX2VPipeline(model_path='{model_path}', model_cls='{model_cls}', task='{task}')")
         pipeline = LightX2VPipeline(
             model_path=model_path,
@@ -69,10 +89,17 @@ def load_model(
         )
         logger.info("Pipeline created successfully")
         
-        # Enable CPU offload to manage GPU memory (prevents OOM errors)
-        # The model needs ~44GB but offloading allows parts to stay on CPU
+        # Enable CPU offload BEFORE loading heavy components
         logger.info("Enabling CPU offload to manage GPU memory...")
         pipeline.enable_offload()
+        
+        # Enable FP8 quantization if available (reduces memory significantly)
+        logger.info("Enabling FP8 quantization...")
+        try:
+            pipeline.enable_quantize()
+            logger.info("FP8 quantization enabled")
+        except Exception as quant_err:
+            logger.warning(f"Could not enable quantization: {quant_err}")
                 
         # Create generator ONCE during startup (from PROBLEMS_FACED.txt)
         # Calling create_generator() multiple times causes JSON serialization errors
