@@ -101,18 +101,18 @@ else
 fi
 
 # ============================================
-# Download required models (Base + FP8 LoRA branch)
+# Download required models (Base + 4-step Lightning LoRA branch)
 # ============================================
 # For this branch we need:
-# 1. Base model (Qwen/Qwen-Image-Edit-2511) - contains configs, scheduler, text_encoder, vae, tokenizer
-# 2. FP8 weights file from lightx2v/Qwen-Image-Edit-2511-Lightning
+# 1. Base model (Qwen/Qwen-Image-Edit-2511) - full precision model
+# 2. 4-step Lightning LoRA weights from lightx2v/Qwen-Image-Edit-2511-Lightning
 # ============================================
 
 MODEL_CACHE_DIR="${MODEL_CACHE_DIR:-/workspace/models}"
 mkdir -p "$MODEL_CACHE_DIR"
 
 echo -e "\n${GREEN}=========================================="
-echo "Downloading Required Models (Base + FP8 LoRA)"
+echo "Downloading Required Models (Base + 4-step Lightning LoRA)"
 echo "==========================================${NC}"
 
 # 1. Download base model (Qwen/Qwen-Image-Edit-2511)
@@ -121,7 +121,7 @@ if [ -d "$BASE_MODEL_DIR" ] && [ -f "$BASE_MODEL_DIR/scheduler/scheduler_config.
     echo -e "${GREEN}Base model already exists at: $BASE_MODEL_DIR${NC}"
 else
     echo -e "\n${GREEN}Downloading base model (Qwen/Qwen-Image-Edit-2511)...${NC}"
-    echo -e "${YELLOW}This contains configs, scheduler, text_encoder, vae, tokenizer (~40GB)${NC}"
+    echo -e "${YELLOW}This is the full precision model (~40GB)${NC}"
     
     huggingface-cli download Qwen/Qwen-Image-Edit-2511 \
         --local-dir "$BASE_MODEL_DIR" \
@@ -130,25 +130,25 @@ else
     echo -e "${GREEN}Base model downloaded successfully${NC}"
 fi
 
-# 2. Download FP8 Lightning weights (only the specific file we need)
+# 2. Download 4-step Lightning LoRA weights (only the specific file we need)
 LIGHTNING_DIR="$MODEL_CACHE_DIR/Qwen-Image-Edit-2511-Lightning"
-FP8_WEIGHTS_FILE="qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors"
+LORA_WEIGHTS_FILE="Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors"
 
 mkdir -p "$LIGHTNING_DIR"
 
-if [ -f "$LIGHTNING_DIR/$FP8_WEIGHTS_FILE" ]; then
-    echo -e "${GREEN}FP8 weights already exist at: $LIGHTNING_DIR/$FP8_WEIGHTS_FILE${NC}"
+if [ -f "$LIGHTNING_DIR/$LORA_WEIGHTS_FILE" ]; then
+    echo -e "${GREEN}4-step Lightning LoRA weights already exist at: $LIGHTNING_DIR/$LORA_WEIGHTS_FILE${NC}"
 else
-    echo -e "\n${GREEN}Downloading FP8 Lightning weights...${NC}"
-    echo -e "${YELLOW}Downloading only the required FP8 weights file (~20GB)${NC}"
+    echo -e "\n${GREEN}Downloading 4-step Lightning LoRA weights...${NC}"
+    echo -e "${YELLOW}Downloading only the required LoRA weights file (~800MB)${NC}"
     
-    # Download only the specific FP8 weights file we need
+    # Download only the specific LoRA weights file we need
     huggingface-cli download lightx2v/Qwen-Image-Edit-2511-Lightning \
-        "$FP8_WEIGHTS_FILE" \
+        "$LORA_WEIGHTS_FILE" \
         --local-dir "$LIGHTNING_DIR" \
         --local-dir-use-symlinks False
     
-    echo -e "${GREEN}FP8 weights downloaded successfully${NC}"
+    echo -e "${GREEN}4-step Lightning LoRA weights downloaded successfully${NC}"
 fi
 
 # Verify downloads
@@ -168,10 +168,10 @@ else
     exit 1
 fi
 
-if [ -f "$LIGHTNING_DIR/$FP8_WEIGHTS_FILE" ]; then
-    echo -e "${GREEN}✓ FP8 weights file found${NC}"
+if [ -f "$LIGHTNING_DIR/$LORA_WEIGHTS_FILE" ]; then
+    echo -e "${GREEN}✓ 4-step Lightning LoRA weights file found${NC}"
 else
-    echo -e "${RED}✗ FP8 weights file missing${NC}"
+    echo -e "${RED}✗ 4-step Lightning LoRA weights file missing${NC}"
     exit 1
 fi
 
@@ -183,15 +183,16 @@ mkdir -p logs
 chmod +x setup.sh
 
 echo -e "\n${GREEN}=========================================="
-echo "Setup completed successfully! (Base + FP8 LoRA)"
+echo "Setup completed successfully! (Base + 4-step Lightning LoRA)"
 echo "==========================================${NC}"
 echo ""
 echo "Models downloaded to: $MODEL_CACHE_DIR"
-echo "  - Base model: $BASE_MODEL_DIR"
-echo "  - FP8 weights: $LIGHTNING_DIR/$FP8_WEIGHTS_FILE"
+echo "  - Base model (full precision): $BASE_MODEL_DIR"
+echo "  - 4-step Lightning LoRA: $LIGHTNING_DIR/$LORA_WEIGHTS_FILE"
 echo ""
 echo "This branch uses:"
-echo "  - Base model with FP8 quantized weights (FP8 LoRA)"
+echo "  - Full precision base model"
+echo "  - 4-step Lightning LoRA (BF16) for fast inference"
 echo "  - CPU offload for memory management"
 echo "  - 20 inference steps"
 echo ""

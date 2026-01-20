@@ -1,6 +1,6 @@
-"""Model loader for Qwen-Image-Edit-2511 with FP8 LoRA using LightX2V framework.
+"""Model loader for Qwen-Image-Edit-2511 with 4-step Lightning LoRA using LightX2V framework.
 
-Base-bf16 branch: Uses base model with FP8 quantized weights (FP8 LoRA).
+Base-bf16 branch: Uses full precision base model with 4-step Lightning LoRA (BF16).
 Runs 20 inference steps with CPU offload for memory management.
 
 Based on the working VTON project (try_og_pipeline).
@@ -39,16 +39,13 @@ def find_base_model_path() -> Optional[str]:
     return None
 
 
-def find_fp8_weights_path() -> Optional[str]:
-    """Find the FP8 quantized weights file."""
+def find_lora_weights_path() -> Optional[str]:
+    """Find the 4-step Lightning LoRA weights file."""
     possible_paths = [
-        # 4-step lightning version (preferred)
-        "/workspace/models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors",
-        "/workspace/outfit-extractor/models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors",
-        "models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors",
-        # Alternative paths
-        "/workspace/models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning.safetensors",
-        "/workspace/models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled.safetensors",
+        "/workspace/models/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+        "/workspace/models/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-fp32.safetensors",
+        "/workspace/outfit-extractor/models/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+        "models/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
     ]
     
     for path in possible_paths:
@@ -96,9 +93,9 @@ def load_model(
     cache_dir: Optional[str] = None,
 ):
     """
-    Load Qwen-Image-Edit-2511 model with FP8 LoRA using LightX2V framework.
+    Load Qwen-Image-Edit-2511 model with 4-step Lightning LoRA using LightX2V framework.
     
-    Uses base model with FP8 quantized weights (FP8 LoRA).
+    Uses full precision base model with 4-step Lightning LoRA (BF16).
     Uses 20 inference steps with CPU offload for memory management.
     
     Args:
@@ -124,18 +121,18 @@ def load_model(
     
     logger.info(f"Base model path: {model_path}")
     
-    # Find FP8 weights
-    fp8_path = find_fp8_weights_path()
-    if fp8_path is None:
+    # Find 4-step Lightning LoRA weights
+    lora_path = find_lora_weights_path()
+    if lora_path is None:
         raise RuntimeError(
-            "FP8 weights not found!\n"
+            "4-step Lightning LoRA weights not found!\n"
             "Download with: huggingface-cli download lightx2v/Qwen-Image-Edit-2511-Lightning "
-            "qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors "
+            "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors "
             "--local-dir /workspace/models/Qwen-Image-Edit-2511-Lightning"
         )
     
-    logger.info(f"FP8 weights found: {fp8_path}")
-    logger.info("Mode: Base model + FP8 LoRA with CPU offload")
+    logger.info(f"4-step Lightning LoRA weights found: {lora_path}")
+    logger.info("Mode: Full precision base model + 4-step Lightning LoRA with CPU offload")
     
     # 20 steps for better quality
     steps = 20
@@ -169,14 +166,12 @@ def load_model(
         )
         logger.info("CPU offload enabled")
         
-        # Enable FP8 quantization with FP8 weights
-        logger.info(f"Enabling FP8 quantization with: {fp8_path}")
-        pipe.enable_quantize(
-            dit_quantized=True,
-            dit_quantized_ckpt=fp8_path,
-            quant_scheme="fp8-sgl"
-        )
-        logger.info("FP8 quantization enabled")
+        # Load 4-step Lightning LoRA
+        logger.info(f"Loading 4-step Lightning LoRA: {lora_path}")
+        pipe.enable_lora([
+            {"path": lora_path, "strength": 1.0},
+        ])
+        logger.info("4-step Lightning LoRA loaded")
         
         # Get attention mode
         attn_mode = get_attention_mode()
@@ -207,7 +202,7 @@ def load_model(
             total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
             logger.info(f"GPU Memory: {allocated:.2f} GB / {total:.2f} GB")
         
-        logger.info("Pipeline initialized successfully (Base + FP8 LoRA + CPU offload, 20 steps)")
+        logger.info("Pipeline initialized successfully (Full precision base + 4-step Lightning LoRA + CPU offload, 20 steps)")
         return pipe
         
     except ImportError as e:
@@ -224,7 +219,8 @@ def get_model_info() -> dict:
     """Get information about the loaded model."""
     return {
         "model_name": "Qwen-Image-Edit-2511",
-        "quantization": "FP8 LoRA",
+        "precision": "Full precision base + 4-step Lightning LoRA",
+        "lora": True,
         "cpu_offload": True,
         "framework": "LightX2V",
         "inference_steps": 20,
