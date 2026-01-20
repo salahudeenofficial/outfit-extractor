@@ -4,7 +4,10 @@ Pillow
 numpy
 huggingface-hub
 pydantic>=2.0
-
-# Note: LightX2V may need to be installed separately:
-# pip install git+https://github.com/ModelTC/LightX2V.git
-# or check container-specific installation instructions
+# Diffusers branch dependencies:
+diffusers[torch]
+peft
+safetensors
+accelerate
+transformers
+torch

@@ -1,7 +1,7 @@
 """Outfit extraction logic with fixed prompt for consistent results.
 
-Based on the working VTON project (try_og_pipeline).
-Key: Use 3:4 aspect ratio and monkey-patch run_pipeline to inject aspect_ratio.
+Diffusers branch: Uses HuggingFace Diffusers pipeline API.
+Key: Use 3:4 aspect ratio and Diffusers pipeline call interface.
 """
 
 from PIL import Image
@@ -9,7 +9,11 @@ import numpy as np
 import tempfile
 import os
 import json
+import logging
+import torch
 from typing import Optional, Any, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 # Fixed prompt for outfit extraction
@@ -148,130 +152,58 @@ def extract_outfit(
     # Preprocess image to target dimensions
     processed_image = preprocess_image(input_image, target_width, target_height)
     
-    # Run inference using LightX2V
+    # Run inference using Diffusers pipeline
     output = None
     last_error = None
     
-    # Save PIL Image to temporary file for image_path parameter
-    temp_input_file = None
-    temp_output_file = None
     try:
-        # Create temporary file for input image
-        temp_fd, temp_input_path = tempfile.mkstemp(suffix='.png')
-        os.close(temp_fd)
-        processed_image.save(temp_input_path, format='PNG')
-        temp_input_file = temp_input_path
-        
-        # Create temporary file for output image
-        temp_fd2, temp_output_path = tempfile.mkstemp(suffix='.png')
-        os.close(temp_fd2)
-        temp_output_file = temp_output_path
-        
         # Define negative prompt
         negative_prompt = "blurry, low quality, distorted, artifacts, deformed, bad anatomy"
         
-        # Monkey-patch run_pipeline to inject aspect_ratio into input_info
-        # This is needed because LightX2V's get_custom_shape() checks input_info.aspect_ratio
-        # (From PROBLEMS_FACED.txt in VTON project)
-        if hasattr(pipeline, 'runner') and hasattr(pipeline.runner, 'run_pipeline'):
-            original_run_pipeline = pipeline.runner.run_pipeline
-            
-            def patched_run_pipeline(input_info):
-                input_info.aspect_ratio = target_aspect_ratio
-                # Also need to set _auto_resize in config (get_custom_shape checks it)
-                pipeline.runner.config["_auto_resize"] = False
-                return original_run_pipeline(input_info)
-            
-            pipeline.runner.run_pipeline = patched_run_pipeline
+        # Diffusers pipeline call
+        # Use __call__ method with image, prompt, num_inference_steps, guidance_scale
+        logger.info(f"Running Diffusers inference: {num_inference_steps} steps, size={target_width}x{target_height}")
         
-        try:
-            # Generate with simple parameters
-            # Resolution is controlled by pre-resizing the input image
-            output = pipeline.generate(
-                seed=42,
-                image_path=temp_input_path,
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                save_result_path=temp_output_path
-            )
-        except Exception as e:
-            last_error = e
-        finally:
-            # Restore original method
-            if hasattr(pipeline, 'runner') and hasattr(pipeline.runner, 'run_pipeline'):
-                try:
-                    pipeline.runner.run_pipeline = original_run_pipeline
-                except:
-                    pass
+        result = pipeline(
+            image=processed_image,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            height=target_height,
+            width=target_width,
+            generator=torch.Generator(device="cuda" if torch.cuda.is_available() else "cpu").manual_seed(42),
+        )
         
-        # If output is None but save_result_path was used, load from file
-        if output is None and temp_output_file and os.path.exists(temp_output_file):
-            file_size = os.path.getsize(temp_output_file)
-            if file_size > 0:
-                output = Image.open(temp_output_file)
-                
-    finally:
-        # Clean up temporary input file
-        if temp_input_file and os.path.exists(temp_input_file):
-            try:
-                os.unlink(temp_input_file)
-            except Exception:
-                pass
-        # Keep output file until we've processed it (cleanup after extraction)
+        # Diffusers returns a dict with 'images' key containing list of PIL Images
+        if isinstance(result, dict) and "images" in result:
+            images = result["images"]
+            if isinstance(images, list) and len(images) > 0:
+                output = images[0]
+            elif isinstance(images, Image.Image):
+                output = images
+        elif isinstance(result, Image.Image):
+            output = result
+        else:
+            raise ValueError(f"Unexpected output format from Diffusers pipeline: {type(result)}")
+            
+    except Exception as e:
+        last_error = e
+        logger.error(f"Diffusers inference failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
     
     if output is None:
         error_msg = str(last_error) if last_error else "Unknown error"
         error_type = type(last_error).__name__ if last_error else "Unknown"
         raise RuntimeError(
-            f"Failed to generate image. Tried multiple approaches. "
-            f"Last error ({error_type}): {error_msg}. "
-            f"Pipeline type: {type(pipeline).__name__}. "
-            f"Pipeline methods available: {[m for m in dir(pipeline) if not m.startswith('_') and callable(getattr(pipeline, m, None))]}. "
-            f"Please check LightX2V documentation for image editing task API."
+            f"Failed to generate image using Diffusers pipeline. "
+            f"Error ({error_type}): {error_msg}. "
+            f"Pipeline type: {type(pipeline).__name__}."
         )
     
-    # Extract image from output
-    result_image = None
+    # Output should already be a PIL Image from Diffusers
+    if not isinstance(output, Image.Image):
+        raise ValueError(f"Unexpected output format from Diffusers pipeline: {type(output)}. Expected PIL Image.")
     
-    # If output is already a PIL Image
-    if isinstance(output, Image.Image):
-        result_image = output
-    # LightX2V generate() may return a dict with 'images' key or list
-    elif isinstance(output, dict):
-        result_image = output.get("images", output.get("image", output.get("result")))
-        if result_image is None:
-            # Try to find any image-like value in the dict
-            for key, val in output.items():
-                if isinstance(val, Image.Image):
-                    result_image = val
-                    break
-                elif isinstance(val, list) and len(val) > 0 and isinstance(val[0], Image.Image):
-                    result_image = val[0]
-                    break
-        if isinstance(result_image, list) and len(result_image) > 0:
-            result_image = result_image[0]
-    elif isinstance(output, list) and len(output) > 0:
-        result_image = output[0]
-    elif hasattr(output, 'images'):
-        result_image = output.images[0] if isinstance(output.images, list) else output.images
-    elif hasattr(output, 'image'):
-        result_image = output.image
-    
-    # If still not a PIL Image, try to load from output file
-    if result_image is None or not isinstance(result_image, Image.Image):
-        if temp_output_file and os.path.exists(temp_output_file):
-            file_size = os.path.getsize(temp_output_file)
-            if file_size > 0:
-                result_image = Image.open(temp_output_file).copy()
-    
-    # Clean up output file now
-    if temp_output_file and os.path.exists(temp_output_file):
-        try:
-            os.unlink(temp_output_file)
-        except Exception:
-            pass
-    
-    if result_image is None or not isinstance(result_image, Image.Image):
-        raise ValueError(f"Unexpected output format from pipeline: {type(output)}. Could not extract PIL Image.")
-    
-    return postprocess_image(result_image, ensure_white_bg=True)
+    return postprocess_image(output, ensure_white_bg=True)

@@ -1,4 +1,4 @@
-"""FastAPI server for outfit extraction using Qwen-Image-Edit-2511 FP8 model."""
+"""FastAPI server for outfit extraction using Qwen-Image-Edit-2511 with Diffusers."""
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     global pipeline
     
     # Startup: Load model
-    logger.info("Loading Qwen-Image-Edit-2511 FP8 model...")
+    logger.info("Loading Qwen-Image-Edit-2511 model with Diffusers...")
     try:
         pipeline = load_model(device="cuda")
         logger.info("Model loaded successfully")
@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Outfit Extractor API",
-    description="Extract outfits from images using Qwen-Image-Edit-2511 FP8 model",
+    description="Extract outfits from images using Qwen-Image-Edit-2511 with Diffusers (full precision + 4-step Lightning LoRA)",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -90,7 +90,7 @@ async def root() -> RootResponse:
 @app.post("/extract")
 async def extract_outfit_endpoint(
     file: UploadFile = File(...),
-    num_inference_steps: int = Query(default=4, ge=1, le=50),
+    num_inference_steps: int = Query(default=20, ge=1, le=50),
     guidance_scale: float = Query(default=1.0, ge=0.0, le=20.0)
 ) -> StreamingResponse:
     """
@@ -98,7 +98,7 @@ async def extract_outfit_endpoint(
     
     Args:
         file: Image file to process.
-        num_inference_steps: Number of inference steps (default: 4 for Lightning).
+        num_inference_steps: Number of inference steps (default: 20).
         guidance_scale: Guidance scale (default: 1.0).
     
     Returns:

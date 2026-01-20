@@ -1,12 +1,12 @@
 #!/bin/bash
-# Setup script for Outfit Extractor (Base Full Precision branch)
-# Uses base model with CPU offload - NO LoRA, NO FP8
-# Designed to run inside lightx2v/lightx2v:25101501-cu124 container
+# Setup script for Outfit Extractor (Diffusers branch)
+# Uses HuggingFace Diffusers with full precision base model + 4-step Lightning LoRA
+# Designed to run inside a CUDA-enabled container
 
 set -e  # Exit on error
 
 echo "=========================================="
-echo "Outfit Extractor Setup (Base Full Precision)"
+echo "Outfit Extractor Setup (Diffusers Branch)"
 echo "=========================================="
 
 # Colors for output
@@ -64,44 +64,23 @@ else
     echo -e "${YELLOW}PyTorch not installed or CUDA check failed${NC}"
 fi
 
-# Reinstall LightX2V from pinned commit to avoid breaking changes
-# IMPORTANT: The container's pre-installed LightX2V may have breaking changes
-# Commit 7651b0f is the last known working version for i2i tasks
-echo -e "\n${GREEN}Installing LightX2V (pinned to commit 7651b0f to avoid breaking changes)...${NC}"
+# Install Diffusers and required dependencies
+echo -e "\n${GREEN}Installing HuggingFace Diffusers and dependencies...${NC}"
 
-# Remove existing LightX2V installation
-echo -e "${YELLOW}Removing existing LightX2V installation...${NC}"
-pip uninstall -y lightx2v 2>/dev/null || true
-
-# Clone and install from pinned commit
-LIGHTX2V_DIR="/workspace/LightX2V"
-if [ -d "$LIGHTX2V_DIR" ]; then
-    echo -e "${YELLOW}Removing existing LightX2V directory...${NC}"
-    rm -rf "$LIGHTX2V_DIR"
-fi
-
-echo -e "${GREEN}Cloning LightX2V repository...${NC}"
-git clone https://github.com/ModelTC/LightX2V.git "$LIGHTX2V_DIR"
-
-echo -e "${GREEN}Checking out pinned commit 7651b0f...${NC}"
-cd "$LIGHTX2V_DIR"
-git checkout 7651b0f
-
-echo -e "${GREEN}Installing LightX2V from pinned commit...${NC}"
-pip install -v -e .
-
-cd "$SCRIPT_DIR"
+# Install Diffusers, PEFT (for LoRA), and safetensors
+pip install diffusers[torch] peft safetensors accelerate transformers pillow
 
 # Verify installation
-if python3 -c "import lightx2v" 2>/dev/null; then
-    echo -e "${GREEN}LightX2V framework installed successfully from pinned commit${NC}"
+if python3 -c "import diffusers; import peft; import safetensors" 2>/dev/null; then
+    echo -e "${GREEN}Diffusers and dependencies installed successfully${NC}"
+    python3 -c "import diffusers; print(f'Diffusers version: {diffusers.__version__}')"
 else
-    echo -e "${RED}Failed to install LightX2V${NC}"
+    echo -e "${RED}Failed to install Diffusers or dependencies${NC}"
     exit 1
 fi
 
 # ============================================
-# Download required models (Base + 4-step Lightning LoRA branch)
+# Download required models (Diffusers branch)
 # ============================================
 # For this branch we need:
 # 1. Base model (Qwen/Qwen-Image-Edit-2511) - full precision model
@@ -112,7 +91,7 @@ MODEL_CACHE_DIR="${MODEL_CACHE_DIR:-/workspace/models}"
 mkdir -p "$MODEL_CACHE_DIR"
 
 echo -e "\n${GREEN}=========================================="
-echo "Downloading Required Models (Base + 4-step Lightning LoRA)"
+echo "Downloading Required Models (Diffusers Branch)"
 echo "==========================================${NC}"
 
 # 1. Download base model (Qwen/Qwen-Image-Edit-2511)
@@ -183,7 +162,7 @@ mkdir -p logs
 chmod +x setup.sh
 
 echo -e "\n${GREEN}=========================================="
-echo "Setup completed successfully! (Base + 4-step Lightning LoRA)"
+echo "Setup completed successfully! (Diffusers Branch)"
 echo "==========================================${NC}"
 echo ""
 echo "Models downloaded to: $MODEL_CACHE_DIR"
@@ -191,6 +170,7 @@ echo "  - Base model (full precision): $BASE_MODEL_DIR"
 echo "  - 4-step Lightning LoRA: $LIGHTNING_DIR/$LORA_WEIGHTS_FILE"
 echo ""
 echo "This branch uses:"
+echo "  - HuggingFace Diffusers framework"
 echo "  - Full precision base model"
 echo "  - 4-step Lightning LoRA (BF16) for fast inference"
 echo "  - CPU offload for memory management"
