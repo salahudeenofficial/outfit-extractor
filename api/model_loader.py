@@ -149,7 +149,7 @@ def load_model(
         fp8_path = find_fp8_weights_path()
         if fp8_path:
             logger.info(f"FP8 weights found: {fp8_path}")
-            steps = 10  # 10 steps for better quality
+            steps = 20  # 20 steps for better quality
         else:
             logger.warning("FP8 weights not found, falling back to LoRA mode")
             mode = "lora"
@@ -158,7 +158,7 @@ def load_model(
         lora_path = find_lora_weights_path()
         if lora_path:
             logger.info(f"LoRA weights found: {lora_path}")
-            steps = 10  # 10 steps for better quality
+            steps = 20  # 20 steps for better quality
         else:
             logger.warning("LoRA weights not found, falling back to base mode")
             mode = "base"
