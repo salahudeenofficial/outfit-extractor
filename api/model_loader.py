@@ -106,8 +106,8 @@ def load_model(
     logger.info(f"Base model path: {model_path}")
     logger.info("Mode: Base FP32 (full precision, no LoRA, no FP8, no BF16)")
     
-    # 10 steps for base model
-    steps = 10
+    # 20 steps for better quality
+    steps = 20
     
     # Clear GPU memory before loading
     if torch.cuda.is_available():
@@ -146,7 +146,7 @@ def load_model(
         # Get attention mode
         attn_mode = get_attention_mode()
         
-        # Create generator ONCE during startup with 10 steps
+        # Create generator ONCE during startup with 20 steps
         # (From PROBLEMS_FACED.txt: calling create_generator() multiple times causes JSON serialization errors)
         # Note: LightX2V uses BF16 by default. The model weights determine precision.
         # The base model uses full precision weights.
@@ -193,6 +193,6 @@ def get_model_info() -> dict:
         "lora": False,
         "cpu_offload": True,
         "framework": "LightX2V",
-        "inference_steps": 10,
+        "inference_steps": 20,
         "device": "cuda" if torch.cuda.is_available() else "cpu"
     }
