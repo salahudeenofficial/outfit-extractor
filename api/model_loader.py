@@ -1,7 +1,7 @@
-"""Model loader for Qwen-Image-Edit-2511 base FP32 model using LightX2V framework.
+"""Model loader for Qwen-Image-Edit-2511 with FP8 LoRA using LightX2V framework.
 
-Base FP32 branch: Uses full precision FP32 model WITHOUT LoRA or FP8.
-Runs 10 inference steps with CPU offload for memory management.
+Base-bf16 branch: Uses base model with FP8 quantized weights (FP8 LoRA).
+Runs 20 inference steps with CPU offload for memory management.
 
 Based on the working VTON project (try_og_pipeline).
 """
@@ -35,6 +35,25 @@ def find_base_model_path() -> Optional[str]:
                         return os.path.join(snapshots_dir, snapshots[0])
             else:
                 return path
+    
+    return None
+
+
+def find_fp8_weights_path() -> Optional[str]:
+    """Find the FP8 quantized weights file."""
+    possible_paths = [
+        # 4-step lightning version (preferred)
+        "/workspace/models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors",
+        "/workspace/outfit-extractor/models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors",
+        "models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors",
+        # Alternative paths
+        "/workspace/models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning.safetensors",
+        "/workspace/models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled.safetensors",
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
     
     return None
 
@@ -77,10 +96,10 @@ def load_model(
     cache_dir: Optional[str] = None,
 ):
     """
-    Load Qwen-Image-Edit-2511 base FP32 model with CPU offload using LightX2V framework.
+    Load Qwen-Image-Edit-2511 model with FP8 LoRA using LightX2V framework.
     
-    NO LoRA, NO FP8, NO BF16 - pure base model with full FP32 precision.
-    Uses 10 inference steps with CPU offload for memory management.
+    Uses base model with FP8 quantized weights (FP8 LoRA).
+    Uses 20 inference steps with CPU offload for memory management.
     
     Args:
         model_path: Path to BASE model checkpoint (Qwen-Image-Edit-2511).
@@ -104,7 +123,19 @@ def load_model(
         )
     
     logger.info(f"Base model path: {model_path}")
-    logger.info("Mode: Base FP32 (full precision, no LoRA, no FP8, no BF16)")
+    
+    # Find FP8 weights
+    fp8_path = find_fp8_weights_path()
+    if fp8_path is None:
+        raise RuntimeError(
+            "FP8 weights not found!\n"
+            "Download with: huggingface-cli download lightx2v/Qwen-Image-Edit-2511-Lightning "
+            "qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors "
+            "--local-dir /workspace/models/Qwen-Image-Edit-2511-Lightning"
+        )
+    
+    logger.info(f"FP8 weights found: {fp8_path}")
+    logger.info("Mode: Base model + FP8 LoRA with CPU offload")
     
     # 20 steps for better quality
     steps = 20
@@ -128,9 +159,8 @@ def load_model(
         )
         logger.info("Pipeline created successfully")
         
-        # Enable CPU offload for full precision model (essential for memory management)
-        # This allows the full precision model to run on GPUs with limited VRAM
-        logger.info("Enabling CPU offload for base FP32 model...")
+        # Enable CPU offload (essential for memory management)
+        logger.info("Enabling CPU offload...")
         pipe.enable_offload(
             cpu_offload=True,
             offload_granularity="block",
@@ -139,9 +169,14 @@ def load_model(
         )
         logger.info("CPU offload enabled")
         
-        # NO LoRA - using pure base model
-        # NO FP8 - using full precision
-        # NO BF16 - using FP32
+        # Enable FP8 quantization with FP8 weights
+        logger.info(f"Enabling FP8 quantization with: {fp8_path}")
+        pipe.enable_quantize(
+            dit_quantized=True,
+            dit_quantized_ckpt=fp8_path,
+            quant_scheme="fp8-sgl"
+        )
+        logger.info("FP8 quantization enabled")
         
         # Get attention mode
         attn_mode = get_attention_mode()
@@ -172,7 +207,7 @@ def load_model(
             total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
             logger.info(f"GPU Memory: {allocated:.2f} GB / {total:.2f} GB")
         
-        logger.info("Pipeline initialized successfully (Base FP32 + CPU offload, 10 steps)")
+        logger.info("Pipeline initialized successfully (Base + FP8 LoRA + CPU offload, 20 steps)")
         return pipe
         
     except ImportError as e:
@@ -189,8 +224,7 @@ def get_model_info() -> dict:
     """Get information about the loaded model."""
     return {
         "model_name": "Qwen-Image-Edit-2511",
-        "quantization": "FP32 (full precision)",
-        "lora": False,
+        "quantization": "FP8 LoRA",
         "cpu_offload": True,
         "framework": "LightX2V",
         "inference_steps": 20,
