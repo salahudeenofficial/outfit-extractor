@@ -1,12 +1,12 @@
 #!/bin/bash
-# Setup script for Outfit Extractor (Base BF16 branch)
-# Uses base BF16 model with CPU offload - NO LoRA, NO FP8
+# Setup script for Outfit Extractor (Base FP32 branch)
+# Uses base FP32 model with CPU offload - NO LoRA, NO FP8, NO BF16
 # Designed to run inside lightx2v/lightx2v:25101501-cu124 container
 
 set -e  # Exit on error
 
 echo "=========================================="
-echo "Outfit Extractor Setup (Base BF16)"
+echo "Outfit Extractor Setup (Base FP32)"
 echo "=========================================="
 
 # Colors for output
@@ -101,10 +101,10 @@ else
 fi
 
 # ============================================
-# Download required models (Base BF16 branch)
+# Download required models (Base FP32 branch)
 # ============================================
-# For Base BF16 branch we ONLY need:
-# 1. Base model (Qwen/Qwen-Image-Edit-2511) - full BF16 model
+# For Base FP32 branch we ONLY need:
+# 1. Base model (Qwen/Qwen-Image-Edit-2511) - full FP32 model
 # NO LoRA weights needed
 # NO FP8 weights needed
 # ============================================
@@ -113,9 +113,9 @@ MODEL_CACHE_DIR="${MODEL_CACHE_DIR:-/workspace/models}"
 mkdir -p "$MODEL_CACHE_DIR"
 
 echo -e "\n${GREEN}=========================================="
-echo "Downloading Required Models (Base BF16)"
+echo "Downloading Required Models (Base FP32)"
 echo "==========================================${NC}"
-echo -e "${YELLOW}This branch uses ONLY the base model - no LoRA, no FP8${NC}"
+echo -e "${YELLOW}This branch uses ONLY the base model - no LoRA, no FP8, no BF16${NC}"
 
 # 1. Download base model (Qwen/Qwen-Image-Edit-2511)
 BASE_MODEL_DIR="$MODEL_CACHE_DIR/Qwen-Image-Edit-2511"
@@ -123,7 +123,7 @@ if [ -d "$BASE_MODEL_DIR" ] && [ -f "$BASE_MODEL_DIR/scheduler/scheduler_config.
     echo -e "${GREEN}Base model already exists at: $BASE_MODEL_DIR${NC}"
 else
     echo -e "\n${GREEN}Downloading base model (Qwen/Qwen-Image-Edit-2511)...${NC}"
-    echo -e "${YELLOW}This is the full BF16 model (~40GB)${NC}"
+    echo -e "${YELLOW}This is the full precision model (~40GB)${NC}"
     
     huggingface-cli download Qwen/Qwen-Image-Edit-2511 \
         --local-dir "$BASE_MODEL_DIR" \
@@ -157,15 +157,16 @@ mkdir -p logs
 chmod +x setup.sh
 
 echo -e "\n${GREEN}=========================================="
-echo "Setup completed successfully! (Base BF16)"
+echo "Setup completed successfully! (Base FP32)"
 echo "==========================================${NC}"
 echo ""
 echo "Models downloaded to: $MODEL_CACHE_DIR"
-echo "  - Base model (BF16): $BASE_MODEL_DIR"
+echo "  - Base model (FP32): $BASE_MODEL_DIR"
 echo ""
 echo "This branch uses:"
-echo "  - Full BF16 precision (no quantization)"
+echo "  - Full FP32 precision (no BF16, no quantization)"
 echo "  - NO LoRA"
+echo "  - NO FP8"
 echo "  - CPU offload for memory management"
 echo "  - 10 inference steps"
 echo ""

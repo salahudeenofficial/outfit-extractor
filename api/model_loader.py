@@ -1,6 +1,6 @@
-"""Model loader for Qwen-Image-Edit-2511 base BF16 model using LightX2V framework.
+"""Model loader for Qwen-Image-Edit-2511 base FP32 model using LightX2V framework.
 
-Base BF16 branch: Uses full precision BF16 model WITHOUT LoRA or FP8.
+Base FP32 branch: Uses full precision FP32 model WITHOUT LoRA or FP8.
 Runs 10 inference steps with CPU offload for memory management.
 
 Based on the working VTON project (try_og_pipeline).
@@ -77,9 +77,9 @@ def load_model(
     cache_dir: Optional[str] = None,
 ):
     """
-    Load Qwen-Image-Edit-2511 base BF16 model with CPU offload using LightX2V framework.
+    Load Qwen-Image-Edit-2511 base FP32 model with CPU offload using LightX2V framework.
     
-    NO LoRA, NO FP8 - pure base model with full BF16 precision.
+    NO LoRA, NO FP8, NO BF16 - pure base model with full FP32 precision.
     Uses 10 inference steps with CPU offload for memory management.
     
     Args:
@@ -104,7 +104,7 @@ def load_model(
         )
     
     logger.info(f"Base model path: {model_path}")
-    logger.info("Mode: Base BF16 (full precision, no LoRA, no FP8)")
+    logger.info("Mode: Base FP32 (full precision, no LoRA, no FP8, no BF16)")
     
     # 10 steps for base model
     steps = 10
@@ -128,9 +128,9 @@ def load_model(
         )
         logger.info("Pipeline created successfully")
         
-        # Enable CPU offload for BF16 model (essential for memory management)
+        # Enable CPU offload for full precision model (essential for memory management)
         # This allows the full precision model to run on GPUs with limited VRAM
-        logger.info("Enabling CPU offload for base BF16 model...")
+        logger.info("Enabling CPU offload for base FP32 model...")
         pipe.enable_offload(
             cpu_offload=True,
             offload_granularity="block",
@@ -140,14 +140,16 @@ def load_model(
         logger.info("CPU offload enabled")
         
         # NO LoRA - using pure base model
-        # NO FP8 - using full BF16 precision
+        # NO FP8 - using full precision
+        # NO BF16 - using FP32
         
         # Get attention mode
         attn_mode = get_attention_mode()
         
         # Create generator ONCE during startup with 10 steps
         # (From PROBLEMS_FACED.txt: calling create_generator() multiple times causes JSON serialization errors)
-        logger.info(f"Creating generator (steps={steps}, attn_mode={attn_mode})...")
+        # use_bfloat16=False to ensure FP32 precision
+        logger.info(f"Creating generator (steps={steps}, attn_mode={attn_mode}, FP32 precision)...")
         pipe.create_generator(
             attn_mode=attn_mode,
             infer_steps=steps,
@@ -155,6 +157,7 @@ def load_model(
             width=768,
             height=1024,
             aspect_ratio="3:4",
+            use_bfloat16=False,  # Force FP32 precision
         )
         
         # Verify runner was created
@@ -169,7 +172,7 @@ def load_model(
             total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
             logger.info(f"GPU Memory: {allocated:.2f} GB / {total:.2f} GB")
         
-        logger.info("Pipeline initialized successfully (Base BF16 + CPU offload, 10 steps)")
+        logger.info("Pipeline initialized successfully (Base FP32 + CPU offload, 10 steps)")
         return pipe
         
     except ImportError as e:
@@ -186,7 +189,7 @@ def get_model_info() -> dict:
     """Get information about the loaded model."""
     return {
         "model_name": "Qwen-Image-Edit-2511",
-        "quantization": "BF16 (full precision)",
+        "quantization": "FP32 (full precision)",
         "lora": False,
         "cpu_offload": True,
         "framework": "LightX2V",
