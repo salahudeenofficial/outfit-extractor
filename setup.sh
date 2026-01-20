@@ -55,27 +55,6 @@ else
 fi
 cd ..
 
-# Check if model needs to be downloaded
-echo -e "\n${GREEN}Checking model availability...${NC}"
-MODEL_PATH="${MODEL_PATH:-lightx2v/Qwen-Image-Edit-2511-Lightning}"
-MODEL_CACHE_DIR="${MODEL_CACHE_DIR:-/workspace/models}"
-
-echo "Model path: $MODEL_PATH"
-echo "Cache directory: $MODEL_CACHE_DIR"
-
-# Create cache directory if it doesn't exist
-mkdir -p "$MODEL_CACHE_DIR"
-
-# Check if huggingface-hub is available for model download
-if python3 -c "import huggingface_hub" 2>/dev/null; then
-    echo -e "\n${GREEN}huggingface-hub is available${NC}"
-    echo -e "${YELLOW}Note: Model will be downloaded automatically on first use if not already cached${NC}"
-    echo -e "${YELLOW}To manually download the model, run:${NC}"
-    echo "  python3 -c \"from huggingface_hub import snapshot_download; snapshot_download('$MODEL_PATH', cache_dir='$MODEL_CACHE_DIR')\""
-else
-    echo -e "\n${YELLOW}huggingface-hub not found. Model will be downloaded on first API call.${NC}"
-fi
-
 # Check CUDA availability
 echo -e "\n${GREEN}Checking CUDA availability...${NC}"
 if python3 -c "import torch; print('CUDA available:', torch.cuda.is_available()); print('CUDA device count:', torch.cuda.device_count() if torch.cuda.is_available() else 0)" 2>/dev/null; then
@@ -120,9 +99,83 @@ else
     exit 1
 fi
 
+# ============================================
+# Download required models
+# ============================================
+# We need TWO things:
+# 1. Base model (Qwen/Qwen-Image-Edit-2511) - contains configs, scheduler, text_encoder, vae, tokenizer
+# 2. FP8 weights file from lightx2v/Qwen-Image-Edit-2511-Lightning
+# ============================================
+
+MODEL_CACHE_DIR="${MODEL_CACHE_DIR:-/workspace/models}"
+mkdir -p "$MODEL_CACHE_DIR"
+
+echo -e "\n${GREEN}=========================================="
+echo "Downloading Required Models"
+echo "==========================================${NC}"
+
+# 1. Download base model (Qwen/Qwen-Image-Edit-2511)
+BASE_MODEL_DIR="$MODEL_CACHE_DIR/Qwen-Image-Edit-2511"
+if [ -d "$BASE_MODEL_DIR" ] && [ -f "$BASE_MODEL_DIR/scheduler/scheduler_config.json" ]; then
+    echo -e "${GREEN}Base model already exists at: $BASE_MODEL_DIR${NC}"
+else
+    echo -e "\n${GREEN}Downloading base model (Qwen/Qwen-Image-Edit-2511)...${NC}"
+    echo -e "${YELLOW}This contains configs, scheduler, text_encoder, vae, tokenizer (~40GB)${NC}"
+    
+    huggingface-cli download Qwen/Qwen-Image-Edit-2511 \
+        --local-dir "$BASE_MODEL_DIR" \
+        --local-dir-use-symlinks False
+    
+    echo -e "${GREEN}Base model downloaded successfully${NC}"
+fi
+
+# 2. Download FP8 Lightning weights (only the specific file we need)
+LIGHTNING_DIR="$MODEL_CACHE_DIR/Qwen-Image-Edit-2511-Lightning"
+FP8_WEIGHTS_FILE="qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors"
+
+mkdir -p "$LIGHTNING_DIR"
+
+if [ -f "$LIGHTNING_DIR/$FP8_WEIGHTS_FILE" ]; then
+    echo -e "${GREEN}FP8 weights already exist at: $LIGHTNING_DIR/$FP8_WEIGHTS_FILE${NC}"
+else
+    echo -e "\n${GREEN}Downloading FP8 Lightning weights...${NC}"
+    echo -e "${YELLOW}Downloading only the required FP8 weights file (~20GB)${NC}"
+    
+    # Download only the specific FP8 weights file we need
+    huggingface-cli download lightx2v/Qwen-Image-Edit-2511-Lightning \
+        "$FP8_WEIGHTS_FILE" \
+        --local-dir "$LIGHTNING_DIR" \
+        --local-dir-use-symlinks False
+    
+    echo -e "${GREEN}FP8 weights downloaded successfully${NC}"
+fi
+
+# Verify downloads
+echo -e "\n${GREEN}Verifying downloaded models...${NC}"
+
+if [ -f "$BASE_MODEL_DIR/scheduler/scheduler_config.json" ]; then
+    echo -e "${GREEN}✓ Base model scheduler config found${NC}"
+else
+    echo -e "${RED}✗ Base model scheduler config missing${NC}"
+    exit 1
+fi
+
+if [ -f "$BASE_MODEL_DIR/transformer/config.json" ]; then
+    echo -e "${GREEN}✓ Base model transformer config found${NC}"
+else
+    echo -e "${RED}✗ Base model transformer config missing${NC}"
+    exit 1
+fi
+
+if [ -f "$LIGHTNING_DIR/$FP8_WEIGHTS_FILE" ]; then
+    echo -e "${GREEN}✓ FP8 weights file found${NC}"
+else
+    echo -e "${RED}✗ FP8 weights file missing${NC}"
+    exit 1
+fi
+
 # Create necessary directories
 echo -e "\n${GREEN}Creating necessary directories...${NC}"
-mkdir -p "$MODEL_CACHE_DIR"
 mkdir -p logs
 
 # Set permissions
@@ -131,6 +184,10 @@ chmod +x setup.sh
 echo -e "\n${GREEN}=========================================="
 echo "Setup completed successfully!"
 echo "==========================================${NC}"
+echo ""
+echo "Models downloaded to: $MODEL_CACHE_DIR"
+echo "  - Base model: $BASE_MODEL_DIR"
+echo "  - FP8 weights: $LIGHTNING_DIR/$FP8_WEIGHTS_FILE"
 echo ""
 echo "Next steps:"
 echo "1. Navigate to the api directory: cd api"
@@ -141,7 +198,4 @@ echo "The server will be accessible at: http://0.0.0.0:8000"
 echo ""
 echo "To check if the server is running:"
 echo "   curl http://localhost:8000/health"
-echo ""
-echo "Note: The model will be downloaded automatically on first API call"
-echo "      if it's not already cached in: $MODEL_CACHE_DIR"
 echo ""
