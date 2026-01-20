@@ -1,12 +1,12 @@
 #!/bin/bash
-# Setup script for Outfit Extractor (Base FP32 branch)
-# Uses base FP32 model with CPU offload - NO LoRA, NO FP8, NO BF16
+# Setup script for Outfit Extractor (Base Full Precision branch)
+# Uses base model with CPU offload - NO LoRA, NO FP8
 # Designed to run inside lightx2v/lightx2v:25101501-cu124 container
 
 set -e  # Exit on error
 
 echo "=========================================="
-echo "Outfit Extractor Setup (Base FP32)"
+echo "Outfit Extractor Setup (Base Full Precision)"
 echo "=========================================="
 
 # Colors for output
@@ -101,10 +101,10 @@ else
 fi
 
 # ============================================
-# Download required models (Base FP32 branch)
+# Download required models (Base Full Precision branch)
 # ============================================
-# For Base FP32 branch we ONLY need:
-# 1. Base model (Qwen/Qwen-Image-Edit-2511) - full FP32 model
+# For this branch we ONLY need:
+# 1. Base model (Qwen/Qwen-Image-Edit-2511) - full precision model
 # NO LoRA weights needed
 # NO FP8 weights needed
 # ============================================
@@ -113,9 +113,9 @@ MODEL_CACHE_DIR="${MODEL_CACHE_DIR:-/workspace/models}"
 mkdir -p "$MODEL_CACHE_DIR"
 
 echo -e "\n${GREEN}=========================================="
-echo "Downloading Required Models (Base FP32)"
+echo "Downloading Required Models (Base Full Precision)"
 echo "==========================================${NC}"
-echo -e "${YELLOW}This branch uses ONLY the base model - no LoRA, no FP8, no BF16${NC}"
+echo -e "${YELLOW}This branch uses ONLY the base model - no LoRA, no FP8${NC}"
 
 # 1. Download base model (Qwen/Qwen-Image-Edit-2511)
 BASE_MODEL_DIR="$MODEL_CACHE_DIR/Qwen-Image-Edit-2511"
@@ -157,14 +157,14 @@ mkdir -p logs
 chmod +x setup.sh
 
 echo -e "\n${GREEN}=========================================="
-echo "Setup completed successfully! (Base FP32)"
+echo "Setup completed successfully! (Base Full Precision)"
 echo "==========================================${NC}"
 echo ""
 echo "Models downloaded to: $MODEL_CACHE_DIR"
-echo "  - Base model (FP32): $BASE_MODEL_DIR"
+echo "  - Base model: $BASE_MODEL_DIR"
 echo ""
 echo "This branch uses:"
-echo "  - Full FP32 precision (no BF16, no quantization)"
+echo "  - Full precision (no quantization)"
 echo "  - NO LoRA"
 echo "  - NO FP8"
 echo "  - CPU offload for memory management"

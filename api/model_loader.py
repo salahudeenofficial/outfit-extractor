@@ -148,8 +148,9 @@ def load_model(
         
         # Create generator ONCE during startup with 10 steps
         # (From PROBLEMS_FACED.txt: calling create_generator() multiple times causes JSON serialization errors)
-        # use_bfloat16=False to ensure FP32 precision
-        logger.info(f"Creating generator (steps={steps}, attn_mode={attn_mode}, FP32 precision)...")
+        # Note: LightX2V uses BF16 by default. The model weights determine precision.
+        # The base model uses full precision weights.
+        logger.info(f"Creating generator (steps={steps}, attn_mode={attn_mode})...")
         pipe.create_generator(
             attn_mode=attn_mode,
             infer_steps=steps,
@@ -157,7 +158,6 @@ def load_model(
             width=768,
             height=1024,
             aspect_ratio="3:4",
-            use_bfloat16=False,  # Force FP32 precision
         )
         
         # Verify runner was created
