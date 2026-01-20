@@ -1,11 +1,12 @@
 #!/bin/bash
-# Setup script for Outfit Extractor
+# Setup script for Outfit Extractor (BF16 branch)
+# Uses BF16 model with CPU offload - no FP8 quantization
 # Designed to run inside lightx2v/lightx2v:25101501-cu124 container
 
 set -e  # Exit on error
 
 echo "=========================================="
-echo "Outfit Extractor Setup"
+echo "Outfit Extractor Setup (BF16 Branch)"
 echo "=========================================="
 
 # Colors for output
@@ -100,18 +101,19 @@ else
 fi
 
 # ============================================
-# Download required models
+# Download required models (BF16 branch)
 # ============================================
-# We need TWO things:
-# 1. Base model (Qwen/Qwen-Image-Edit-2511) - contains configs, scheduler, text_encoder, vae, tokenizer
-# 2. FP8 weights file from lightx2v/Qwen-Image-Edit-2511-Lightning
+# For BF16 branch we need:
+# 1. Base model (Qwen/Qwen-Image-Edit-2511) - full BF16 model
+# 2. LoRA weights (optional, for faster 4-step inference)
+# NO FP8 weights needed for this branch
 # ============================================
 
 MODEL_CACHE_DIR="${MODEL_CACHE_DIR:-/workspace/models}"
 mkdir -p "$MODEL_CACHE_DIR"
 
 echo -e "\n${GREEN}=========================================="
-echo "Downloading Required Models"
+echo "Downloading Required Models (BF16 Branch)"
 echo "==========================================${NC}"
 
 # 1. Download base model (Qwen/Qwen-Image-Edit-2511)
@@ -120,7 +122,7 @@ if [ -d "$BASE_MODEL_DIR" ] && [ -f "$BASE_MODEL_DIR/scheduler/scheduler_config.
     echo -e "${GREEN}Base model already exists at: $BASE_MODEL_DIR${NC}"
 else
     echo -e "\n${GREEN}Downloading base model (Qwen/Qwen-Image-Edit-2511)...${NC}"
-    echo -e "${YELLOW}This contains configs, scheduler, text_encoder, vae, tokenizer (~40GB)${NC}"
+    echo -e "${YELLOW}This is the full BF16 model (~40GB)${NC}"
     
     huggingface-cli download Qwen/Qwen-Image-Edit-2511 \
         --local-dir "$BASE_MODEL_DIR" \
@@ -129,25 +131,25 @@ else
     echo -e "${GREEN}Base model downloaded successfully${NC}"
 fi
 
-# 2. Download FP8 Lightning weights (only the specific file we need)
+# 2. Download LoRA weights (BF16 version for 4-step inference)
 LIGHTNING_DIR="$MODEL_CACHE_DIR/Qwen-Image-Edit-2511-Lightning"
-FP8_WEIGHTS_FILE="qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors"
+LORA_WEIGHTS_FILE="Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors"
 
 mkdir -p "$LIGHTNING_DIR"
 
-if [ -f "$LIGHTNING_DIR/$FP8_WEIGHTS_FILE" ]; then
-    echo -e "${GREEN}FP8 weights already exist at: $LIGHTNING_DIR/$FP8_WEIGHTS_FILE${NC}"
+if [ -f "$LIGHTNING_DIR/$LORA_WEIGHTS_FILE" ]; then
+    echo -e "${GREEN}LoRA weights already exist at: $LIGHTNING_DIR/$LORA_WEIGHTS_FILE${NC}"
 else
-    echo -e "\n${GREEN}Downloading FP8 Lightning weights...${NC}"
-    echo -e "${YELLOW}Downloading only the required FP8 weights file (~20GB)${NC}"
+    echo -e "\n${GREEN}Downloading BF16 LoRA weights for 4-step inference...${NC}"
+    echo -e "${YELLOW}Downloading only the BF16 LoRA weights file (~800MB)${NC}"
     
-    # Download only the specific FP8 weights file we need
+    # Download only the BF16 LoRA weights file
     huggingface-cli download lightx2v/Qwen-Image-Edit-2511-Lightning \
-        "$FP8_WEIGHTS_FILE" \
+        "$LORA_WEIGHTS_FILE" \
         --local-dir "$LIGHTNING_DIR" \
         --local-dir-use-symlinks False
     
-    echo -e "${GREEN}FP8 weights downloaded successfully${NC}"
+    echo -e "${GREEN}LoRA weights downloaded successfully${NC}"
 fi
 
 # Verify downloads
@@ -167,11 +169,10 @@ else
     exit 1
 fi
 
-if [ -f "$LIGHTNING_DIR/$FP8_WEIGHTS_FILE" ]; then
-    echo -e "${GREEN}✓ FP8 weights file found${NC}"
+if [ -f "$LIGHTNING_DIR/$LORA_WEIGHTS_FILE" ]; then
+    echo -e "${GREEN}✓ BF16 LoRA weights file found${NC}"
 else
-    echo -e "${RED}✗ FP8 weights file missing${NC}"
-    exit 1
+    echo -e "${YELLOW}⚠ BF16 LoRA weights not found - will use base model (slower)${NC}"
 fi
 
 # Create necessary directories
@@ -182,12 +183,14 @@ mkdir -p logs
 chmod +x setup.sh
 
 echo -e "\n${GREEN}=========================================="
-echo "Setup completed successfully!"
+echo "Setup completed successfully! (BF16 Branch)"
 echo "==========================================${NC}"
 echo ""
 echo "Models downloaded to: $MODEL_CACHE_DIR"
-echo "  - Base model: $BASE_MODEL_DIR"
-echo "  - FP8 weights: $LIGHTNING_DIR/$FP8_WEIGHTS_FILE"
+echo "  - Base model (BF16): $BASE_MODEL_DIR"
+echo "  - LoRA weights: $LIGHTNING_DIR/$LORA_WEIGHTS_FILE"
+echo ""
+echo "This branch uses BF16 with CPU offload (no FP8 quantization)"
 echo ""
 echo "Next steps:"
 echo "1. Navigate to the api directory: cd api"
