@@ -1,11 +1,9 @@
-"""Model loader for Qwen-Image-Edit-2511 FP8 quantized model using LightX2V framework.
+"""Model loader for Qwen-Image-Edit-2511 base BF16 model using LightX2V framework.
+
+Base BF16 branch: Uses full precision BF16 model WITHOUT LoRA or FP8.
+Runs 10 inference steps with CPU offload for memory management.
 
 Based on the working VTON project (try_og_pipeline).
-
-Key insight: The FP8 Lightning model is NOT a standalone model - it only contains
-quantized transformer weights. You need BOTH:
-1. Base model (Qwen-Image-Edit-2511) - for configs, scheduler, text_encoder, vae, tokenizer
-2. FP8 weights file (qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors)
 """
 
 import os
@@ -37,40 +35,6 @@ def find_base_model_path() -> Optional[str]:
                         return os.path.join(snapshots_dir, snapshots[0])
             else:
                 return path
-    
-    return None
-
-
-def find_fp8_weights_path() -> Optional[str]:
-    """Find the FP8 quantized weights file."""
-    possible_paths = [
-        # 4-step lightning version (preferred)
-        "/workspace/models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors",
-        "/workspace/outfit-extractor/models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors",
-        "models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors",
-        # Alternative paths
-        "/workspace/models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning.safetensors",
-        "/workspace/models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled.safetensors",
-    ]
-    
-    for path in possible_paths:
-        if os.path.exists(path):
-            return path
-    
-    return None
-
-
-def find_lora_weights_path() -> Optional[str]:
-    """Find the LoRA weights file (alternative to FP8)."""
-    possible_paths = [
-        "/workspace/models/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
-        "/workspace/models/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-fp32.safetensors",
-        "models/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
-    ]
-    
-    for path in possible_paths:
-        if os.path.exists(path):
-            return path
     
     return None
 
@@ -111,16 +75,17 @@ def load_model(
     model_path: Optional[str] = None,
     device: str = "cuda",
     cache_dir: Optional[str] = None,
-    mode: str = "fp8",  # "fp8", "lora", or "base"
 ):
     """
-    Load Qwen-Image-Edit-2511 model using LightX2V framework.
+    Load Qwen-Image-Edit-2511 base BF16 model with CPU offload using LightX2V framework.
+    
+    NO LoRA, NO FP8 - pure base model with full BF16 precision.
+    Uses 10 inference steps with CPU offload for memory management.
     
     Args:
-        model_path: Path to BASE model checkpoint (Qwen-Image-Edit-2511, not Lightning).
+        model_path: Path to BASE model checkpoint (Qwen-Image-Edit-2511).
         device: Device to load model on ('cuda' or 'cpu').
         cache_dir: Directory to cache downloaded models.
-        mode: "fp8" for FP8 quantized, "lora" for LoRA, "base" for full precision.
     
     Returns:
         Loaded model pipeline.
@@ -128,7 +93,7 @@ def load_model(
     if device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA is not available. Set device='cpu' or ensure GPU is accessible.")
     
-    # Find base model path (REQUIRED - contains all configs)
+    # Find base model path (REQUIRED - contains all configs and weights)
     if model_path is None:
         model_path = os.environ.get("MODEL_PATH") or find_base_model_path()
     
@@ -139,33 +104,10 @@ def load_model(
         )
     
     logger.info(f"Base model path: {model_path}")
+    logger.info("Mode: Base BF16 (full precision, no LoRA, no FP8)")
     
-    # Find FP8 weights (if using FP8 mode)
-    fp8_path = None
-    lora_path = None
-    steps = 40  # Default for base model
-    
-    if mode == "fp8":
-        fp8_path = find_fp8_weights_path()
-        if fp8_path:
-            logger.info(f"FP8 weights found: {fp8_path}")
-            steps = 10  # 10 steps for better quality
-        else:
-            logger.warning("FP8 weights not found, falling back to LoRA mode")
-            mode = "lora"
-    
-    if mode == "lora":
-        lora_path = find_lora_weights_path()
-        if lora_path:
-            logger.info(f"LoRA weights found: {lora_path}")
-            steps = 10  # 10 steps for better quality
-        else:
-            logger.warning("LoRA weights not found, falling back to base mode")
-            mode = "base"
-    
-    if mode == "base":
-        logger.warning("Using base model (40 steps) - this will be SLOW")
-        steps = 40
+    # 10 steps for base model
+    steps = 10
     
     # Clear GPU memory before loading
     if torch.cuda.is_available():
@@ -186,27 +128,24 @@ def load_model(
         )
         logger.info("Pipeline created successfully")
         
-        # Configure based on mode
-        if mode == "fp8" and fp8_path:
-            logger.info(f"Enabling FP8 quantization with: {fp8_path}")
-            pipe.enable_quantize(
-                dit_quantized=True,
-                dit_quantized_ckpt=fp8_path,
-                quant_scheme="fp8-sgl"
-            )
-            logger.info("FP8 quantization enabled")
+        # Enable CPU offload for BF16 model (essential for memory management)
+        # This allows the full precision model to run on GPUs with limited VRAM
+        logger.info("Enabling CPU offload for base BF16 model...")
+        pipe.enable_offload(
+            cpu_offload=True,
+            offload_granularity="block",
+            text_encoder_offload=True,
+            vae_offload=False,  # Keep VAE on GPU for speed
+        )
+        logger.info("CPU offload enabled")
         
-        if mode == "lora" and lora_path:
-            logger.info(f"Loading 4-step Lightning LoRA: {lora_path}")
-            pipe.enable_lora([
-                {"path": lora_path, "strength": 1.0},
-            ])
-            logger.info("LoRA loaded")
+        # NO LoRA - using pure base model
+        # NO FP8 - using full BF16 precision
         
         # Get attention mode
         attn_mode = get_attention_mode()
         
-        # Create generator ONCE during startup
+        # Create generator ONCE during startup with 10 steps
         # (From PROBLEMS_FACED.txt: calling create_generator() multiple times causes JSON serialization errors)
         logger.info(f"Creating generator (steps={steps}, attn_mode={attn_mode})...")
         pipe.create_generator(
@@ -230,7 +169,7 @@ def load_model(
             total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
             logger.info(f"GPU Memory: {allocated:.2f} GB / {total:.2f} GB")
         
-        logger.info("Pipeline initialized successfully")
+        logger.info("Pipeline initialized successfully (Base BF16 + CPU offload, 10 steps)")
         return pipe
         
     except ImportError as e:
@@ -247,8 +186,10 @@ def get_model_info() -> dict:
     """Get information about the loaded model."""
     return {
         "model_name": "Qwen-Image-Edit-2511",
-        "quantization": "FP8",
+        "quantization": "BF16 (full precision)",
+        "lora": False,
+        "cpu_offload": True,
         "framework": "LightX2V",
-        "inference_steps": 4,
+        "inference_steps": 10,
         "device": "cuda" if torch.cuda.is_available() else "cpu"
     }

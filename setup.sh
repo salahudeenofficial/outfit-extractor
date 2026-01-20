@@ -1,11 +1,12 @@
 #!/bin/bash
-# Setup script for Outfit Extractor
+# Setup script for Outfit Extractor (Base BF16 branch)
+# Uses base BF16 model with CPU offload - NO LoRA, NO FP8
 # Designed to run inside lightx2v/lightx2v:25101501-cu124 container
 
 set -e  # Exit on error
 
 echo "=========================================="
-echo "Outfit Extractor Setup"
+echo "Outfit Extractor Setup (Base BF16)"
 echo "=========================================="
 
 # Colors for output
@@ -100,19 +101,21 @@ else
 fi
 
 # ============================================
-# Download required models
+# Download required models (Base BF16 branch)
 # ============================================
-# We need TWO things:
-# 1. Base model (Qwen/Qwen-Image-Edit-2511) - contains configs, scheduler, text_encoder, vae, tokenizer
-# 2. FP8 weights file from lightx2v/Qwen-Image-Edit-2511-Lightning
+# For Base BF16 branch we ONLY need:
+# 1. Base model (Qwen/Qwen-Image-Edit-2511) - full BF16 model
+# NO LoRA weights needed
+# NO FP8 weights needed
 # ============================================
 
 MODEL_CACHE_DIR="${MODEL_CACHE_DIR:-/workspace/models}"
 mkdir -p "$MODEL_CACHE_DIR"
 
 echo -e "\n${GREEN}=========================================="
-echo "Downloading Required Models"
+echo "Downloading Required Models (Base BF16)"
 echo "==========================================${NC}"
+echo -e "${YELLOW}This branch uses ONLY the base model - no LoRA, no FP8${NC}"
 
 # 1. Download base model (Qwen/Qwen-Image-Edit-2511)
 BASE_MODEL_DIR="$MODEL_CACHE_DIR/Qwen-Image-Edit-2511"
@@ -120,34 +123,13 @@ if [ -d "$BASE_MODEL_DIR" ] && [ -f "$BASE_MODEL_DIR/scheduler/scheduler_config.
     echo -e "${GREEN}Base model already exists at: $BASE_MODEL_DIR${NC}"
 else
     echo -e "\n${GREEN}Downloading base model (Qwen/Qwen-Image-Edit-2511)...${NC}"
-    echo -e "${YELLOW}This contains configs, scheduler, text_encoder, vae, tokenizer (~40GB)${NC}"
+    echo -e "${YELLOW}This is the full BF16 model (~40GB)${NC}"
     
     huggingface-cli download Qwen/Qwen-Image-Edit-2511 \
         --local-dir "$BASE_MODEL_DIR" \
         --local-dir-use-symlinks False
     
     echo -e "${GREEN}Base model downloaded successfully${NC}"
-fi
-
-# 2. Download FP8 Lightning weights (only the specific file we need)
-LIGHTNING_DIR="$MODEL_CACHE_DIR/Qwen-Image-Edit-2511-Lightning"
-FP8_WEIGHTS_FILE="qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors"
-
-mkdir -p "$LIGHTNING_DIR"
-
-if [ -f "$LIGHTNING_DIR/$FP8_WEIGHTS_FILE" ]; then
-    echo -e "${GREEN}FP8 weights already exist at: $LIGHTNING_DIR/$FP8_WEIGHTS_FILE${NC}"
-else
-    echo -e "\n${GREEN}Downloading FP8 Lightning weights...${NC}"
-    echo -e "${YELLOW}Downloading only the required FP8 weights file (~20GB)${NC}"
-    
-    # Download only the specific FP8 weights file we need
-    huggingface-cli download lightx2v/Qwen-Image-Edit-2511-Lightning \
-        "$FP8_WEIGHTS_FILE" \
-        --local-dir "$LIGHTNING_DIR" \
-        --local-dir-use-symlinks False
-    
-    echo -e "${GREEN}FP8 weights downloaded successfully${NC}"
 fi
 
 # Verify downloads
@@ -167,13 +149,6 @@ else
     exit 1
 fi
 
-if [ -f "$LIGHTNING_DIR/$FP8_WEIGHTS_FILE" ]; then
-    echo -e "${GREEN}✓ FP8 weights file found${NC}"
-else
-    echo -e "${RED}✗ FP8 weights file missing${NC}"
-    exit 1
-fi
-
 # Create necessary directories
 echo -e "\n${GREEN}Creating necessary directories...${NC}"
 mkdir -p logs
@@ -182,12 +157,17 @@ mkdir -p logs
 chmod +x setup.sh
 
 echo -e "\n${GREEN}=========================================="
-echo "Setup completed successfully!"
+echo "Setup completed successfully! (Base BF16)"
 echo "==========================================${NC}"
 echo ""
 echo "Models downloaded to: $MODEL_CACHE_DIR"
-echo "  - Base model: $BASE_MODEL_DIR"
-echo "  - FP8 weights: $LIGHTNING_DIR/$FP8_WEIGHTS_FILE"
+echo "  - Base model (BF16): $BASE_MODEL_DIR"
+echo ""
+echo "This branch uses:"
+echo "  - Full BF16 precision (no quantization)"
+echo "  - NO LoRA"
+echo "  - CPU offload for memory management"
+echo "  - 10 inference steps"
 echo ""
 echo "Next steps:"
 echo "1. Navigate to the api directory: cd api"
