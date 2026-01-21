@@ -115,19 +115,25 @@ echo -e "\n${GREEN}=========================================="
 echo "Downloading Required Models"
 echo "==========================================${NC}"
 
-# 1. Download base model (Qwen/Qwen-Image-Edit-2511)
+# 1. Download base model components (excluding transformer weights - we use FP8 instead)
 BASE_MODEL_DIR="$MODEL_CACHE_DIR/Qwen-Image-Edit-2511"
 if [ -d "$BASE_MODEL_DIR" ] && [ -f "$BASE_MODEL_DIR/scheduler/scheduler_config.json" ]; then
-    echo -e "${GREEN}Base model already exists at: $BASE_MODEL_DIR${NC}"
+    echo -e "${GREEN}Base model components already exist at: $BASE_MODEL_DIR${NC}"
 else
-    echo -e "\n${GREEN}Downloading base model (Qwen/Qwen-Image-Edit-2511)...${NC}"
-    echo -e "${YELLOW}This contains configs, scheduler, text_encoder, vae, tokenizer (~40GB)${NC}"
+    echo -e "\n${GREEN}Downloading base model components (Qwen/Qwen-Image-Edit-2511)...${NC}"
+    echo -e "${YELLOW}Downloading configs, scheduler, text_encoder, vae, tokenizer (excluding transformer weights - using FP8 instead)${NC}"
+    echo -e "${YELLOW}This should be much smaller (~few GB) since we exclude the ~40GB transformer weights${NC}"
     
+    # Download everything EXCEPT transformer weights (we'll use FP8 weights instead)
     huggingface-cli download Qwen/Qwen-Image-Edit-2511 \
         --local-dir "$BASE_MODEL_DIR" \
-        --local-dir-use-symlinks False
+        --local-dir-use-symlinks False \
+        --exclude "transformer/*.safetensors" \
+        --exclude "transformer/*.bin" \
+        --exclude "transformer/*.pt" \
+        --exclude "transformer/*.ckpt"
     
-    echo -e "${GREEN}Base model downloaded successfully${NC}"
+    echo -e "${GREEN}Base model components downloaded successfully${NC}"
 fi
 
 # 2. Download FP8 base weights (without Lightning)
@@ -151,22 +157,23 @@ else
     echo -e "${GREEN}FP8 base weights downloaded successfully${NC}"
 fi
 
-# 3. Download FP8 4-step Lightning LoRA weights
-FP8_LORA_FILE="qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors"
+# 3. Download 4-step Lightning LoRA weights (BF16 - FP8 LoRA doesn't exist separately)
+LORA_FILE="Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors"
 
-if [ -f "$LIGHTNING_DIR/$FP8_LORA_FILE" ]; then
-    echo -e "${GREEN}FP8 4-step Lightning LoRA weights already exist at: $LIGHTNING_DIR/$FP8_LORA_FILE${NC}"
+if [ -f "$LIGHTNING_DIR/$LORA_FILE" ]; then
+    echo -e "${GREEN}4-step Lightning LoRA weights already exist at: $LIGHTNING_DIR/$LORA_FILE${NC}"
 else
-    echo -e "\n${GREEN}Downloading FP8 4-step Lightning LoRA weights...${NC}"
-    echo -e "${YELLOW}Downloading FP8 Lightning LoRA weights file (~20GB)${NC}"
+    echo -e "\n${GREEN}Downloading 4-step Lightning LoRA weights (BF16)...${NC}"
+    echo -e "${YELLOW}Downloading Lightning LoRA weights file (~850MB)${NC}"
+    echo -e "${YELLOW}Note: FP8 LoRA doesn't exist separately - using BF16 LoRA with FP8 base${NC}"
     
-    # Download FP8 4-step Lightning LoRA weights
+    # Download BF16 4-step Lightning LoRA weights
     huggingface-cli download lightx2v/Qwen-Image-Edit-2511-Lightning \
-        "$FP8_LORA_FILE" \
+        "$LORA_FILE" \
         --local-dir "$LIGHTNING_DIR" \
         --local-dir-use-symlinks False
     
-    echo -e "${GREEN}FP8 4-step Lightning LoRA weights downloaded successfully${NC}"
+    echo -e "${GREEN}4-step Lightning LoRA weights downloaded successfully${NC}"
 fi
 
 # Verify downloads
@@ -193,10 +200,10 @@ else
     exit 1
 fi
 
-if [ -f "$LIGHTNING_DIR/$FP8_LORA_FILE" ]; then
-    echo -e "${GREEN}✓ FP8 4-step Lightning LoRA weights file found${NC}"
+if [ -f "$LIGHTNING_DIR/$LORA_FILE" ]; then
+    echo -e "${GREEN}✓ 4-step Lightning LoRA weights file found${NC}"
 else
-    echo -e "${RED}✗ FP8 4-step Lightning LoRA weights file missing${NC}"
+    echo -e "${RED}✗ 4-step Lightning LoRA weights file missing${NC}"
     exit 1
 fi
 
@@ -212,9 +219,11 @@ echo "Setup completed successfully!"
 echo "==========================================${NC}"
 echo ""
 echo "Models downloaded to: $MODEL_CACHE_DIR"
-echo "  - Base model: $BASE_MODEL_DIR"
-echo "  - FP8 base weights: $LIGHTNING_DIR/$FP8_BASE_FILE"
-echo "  - FP8 4-step Lightning LoRA: $LIGHTNING_DIR/$FP8_LORA_FILE"
+echo "  - Base model components: $BASE_MODEL_DIR"
+echo "  - FP8 scaled base weights: $LIGHTNING_DIR/$FP8_BASE_FILE"
+echo "  - BF16 4-step Lightning LoRA: $LIGHTNING_DIR/$LORA_FILE"
+echo ""
+echo "Note: FP8 LoRA doesn't exist separately - using BF16 LoRA with FP8 base"
 echo ""
 echo "Next steps:"
 echo "1. Navigate to the api directory: cd api"

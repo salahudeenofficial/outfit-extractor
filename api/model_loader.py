@@ -53,13 +53,17 @@ def find_fp8_base_weights_path() -> Optional[str]:
     return None
 
 
-def find_fp8_lora_weights_path() -> Optional[str]:
-    """Find the FP8 4-step Lightning LoRA weights file."""
+def find_lora_weights_path() -> Optional[str]:
+    """Find the 4-step Lightning LoRA weights file (BF16 or FP32, not FP8 - FP8 LoRA doesn't exist separately)."""
     possible_paths = [
-        # FP8 Lightning 4-step LoRA
-        "/workspace/models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors",
-        "/workspace/outfit-extractor/models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors",
-        "models/Qwen-Image-Edit-2511-Lightning/qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors",
+        # BF16 LoRA (preferred - smaller, good quality)
+        "/workspace/models/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+        "/workspace/outfit-extractor/models/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+        "models/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+        # FP32 LoRA (fallback - larger but higher precision)
+        "/workspace/models/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-fp32.safetensors",
+        "/workspace/outfit-extractor/models/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-fp32.safetensors",
+        "models/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-fp32.safetensors",
     ]
     
     for path in possible_paths:
@@ -145,20 +149,21 @@ def load_model(
         )
     logger.info(f"FP8 base weights found: {fp8_base_path}")
     
-    # Find FP8 4-step Lightning LoRA weights
-    fp8_lora_path = find_fp8_lora_weights_path()
-    if not fp8_lora_path:
+    # Find 4-step Lightning LoRA weights (BF16 or FP32 - FP8 LoRA doesn't exist separately)
+    lora_path = find_lora_weights_path()
+    if not lora_path:
         raise RuntimeError(
-            "FP8 4-step Lightning LoRA weights not found!\n"
+            "4-step Lightning LoRA weights not found!\n"
             "Download with: huggingface-cli download lightx2v/Qwen-Image-Edit-2511-Lightning "
-            "qwen_image_edit_2511_fp8_e4m3fn_scaled_lightning_4steps_v1.0.safetensors "
+            "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors "
             "--local-dir /workspace/models/Qwen-Image-Edit-2511-Lightning"
         )
-    logger.info(f"FP8 4-step Lightning LoRA weights found: {fp8_lora_path}")
+    logger.info(f"4-step Lightning LoRA weights found: {lora_path}")
+    logger.info("Note: Using BF16/FP32 LoRA with FP8 base (FP8 LoRA doesn't exist separately)")
     
     # Use 20 inference steps as requested
     inference_steps = 20
-    logger.info(f"Mode: FP8 base model + FP8 4-step Lightning LoRA with {inference_steps} inference steps")
+    logger.info(f"Mode: FP8 scaled base model + BF16/FP32 4-step Lightning LoRA with {inference_steps} inference steps")
     
     # Clear GPU memory before loading
     if torch.cuda.is_available():
@@ -193,12 +198,12 @@ def load_model(
         )
         logger.info("FP8 base quantization enabled")
         
-        # Load FP8 4-step Lightning LoRA
-        logger.info(f"Loading FP8 4-step Lightning LoRA: {fp8_lora_path}")
+        # Load 4-step Lightning LoRA (BF16 or FP32)
+        logger.info(f"Loading 4-step Lightning LoRA: {lora_path}")
         pipe.enable_lora([
-            {"path": fp8_lora_path, "strength": 1.0},
+            {"path": lora_path, "strength": 1.0},
         ])
-        logger.info("FP8 4-step Lightning LoRA loaded")
+        logger.info("4-step Lightning LoRA loaded")
         
         # Get attention mode
         attn_mode = get_attention_mode()
@@ -226,7 +231,7 @@ def load_model(
             total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
             logger.info(f"GPU Memory: {allocated:.2f} GB / {total:.2f} GB")
         
-        logger.info("Pipeline initialized successfully (FP8 base + FP8 4-step Lightning LoRA)")
+        logger.info("Pipeline initialized successfully (FP8 scaled base + BF16/FP32 4-step Lightning LoRA)")
         return pipe
         
     except ImportError as e:
@@ -243,7 +248,7 @@ def get_model_info() -> dict:
     """Get information about the loaded model."""
     return {
         "model_name": "Qwen-Image-Edit-2511",
-        "quantization": "FP8 base + FP8 4-step Lightning LoRA",
+        "quantization": "FP8 scaled base + BF16/FP32 4-step Lightning LoRA",
         "framework": "LightX2V",
         "inference_steps": 20,
         "device": "cuda" if torch.cuda.is_available() else "cpu"
