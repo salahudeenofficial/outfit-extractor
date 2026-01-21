@@ -127,11 +127,40 @@ def load_model(
         
         # Load the pipeline with full precision
         # Note: device_map is not used here - we use enable_model_cpu_offload() instead
-        pipe = DiffusionPipeline.from_pretrained(
-            model_path,
-            torch_dtype=torch.float32,  # Full precision
-            cache_dir=cache_dir,
-        )
+        # Skip video processor if present (we only need image processing)
+        try:
+            pipe = DiffusionPipeline.from_pretrained(
+                model_path,
+                torch_dtype=torch.float32,  # Full precision
+                cache_dir=cache_dir,
+            )
+        except Exception as e:
+            # If loading fails due to video processor, try loading without it
+            if "VideoProcessor" in str(e) or "torchvision" in str(e):
+                logger.warning(f"Initial load failed (likely video processor issue): {e}")
+                logger.info("Attempting to load without video processor...")
+                # Try loading components manually
+                from diffusers import AutoencoderKL, UNet2DConditionModel
+                from transformers import CLIPTextModel, CLIPTokenizer
+                
+                # Load components individually
+                vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", torch_dtype=torch.float32)
+                text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder", torch_dtype=torch.float32)
+                tokenizer = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer")
+                unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", torch_dtype=torch.float32)
+                
+                # Create pipeline from components
+                pipe = DiffusionPipeline.from_pretrained(
+                    model_path,
+                    vae=vae,
+                    text_encoder=text_encoder,
+                    tokenizer=tokenizer,
+                    unet=unet,
+                    torch_dtype=torch.float32,
+                    cache_dir=cache_dir,
+                )
+            else:
+                raise
         
         logger.info("Pipeline loaded successfully")
         
