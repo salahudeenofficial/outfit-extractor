@@ -193,8 +193,7 @@ def load_model(
                 f"Error: {lora_error}"
             )
         
-        # Set pipeline to evaluation mode
-        pipe.eval()
+        # Note: Diffusers pipelines don't have eval() - components are already in eval mode
         
         # Memory stats
         if torch.cuda.is_available():
