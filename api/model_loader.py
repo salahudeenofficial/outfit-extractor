@@ -1,7 +1,7 @@
 """Model loader for Qwen-Image-Edit-2511 with 4-step Lightning LoRA using HuggingFace Diffusers.
 
 Diffusers branch: Uses full precision base model with 4-step Lightning LoRA via Diffusers library.
-Runs 20 inference steps with CPU offload for memory management.
+Runs 4 inference steps (optimized for Lightning LoRA) with CPU offload for memory management.
 """
 
 import os
@@ -63,7 +63,7 @@ def load_model(
     Load Qwen-Image-Edit-2511 model with 4-step Lightning LoRA using HuggingFace Diffusers.
     
     Uses full precision base model with 4-step Lightning LoRA (BF16).
-    Uses 20 inference steps with CPU offload for memory management.
+    Uses 4 inference steps (optimized for the Lightning LoRA) with CPU offload for memory management.
     
     Args:
         model_path: Path to BASE model checkpoint (Qwen-Image-Edit-2511) or HuggingFace model ID.
@@ -187,7 +187,8 @@ def get_model_info() -> dict:
         "precision": "Full precision base + 4-step Lightning LoRA",
         "framework": "HuggingFace Diffusers",
         "lora": True,
+        "lora_type": "4-step Lightning LoRA (BF16)",
         "cpu_offload": True,
-        "inference_steps": 20,
+        "inference_steps": 4,
         "device": "cuda" if torch.cuda.is_available() else "cpu"
     }

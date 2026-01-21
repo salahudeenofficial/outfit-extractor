@@ -90,7 +90,7 @@ async def root() -> RootResponse:
 @app.post("/extract")
 async def extract_outfit_endpoint(
     file: UploadFile = File(...),
-    num_inference_steps: int = Query(default=20, ge=1, le=50),
+    num_inference_steps: int = Query(default=4, ge=1, le=50),
     guidance_scale: float = Query(default=1.0, ge=0.0, le=20.0)
 ) -> StreamingResponse:
     """
@@ -98,7 +98,7 @@ async def extract_outfit_endpoint(
     
     Args:
         file: Image file to process.
-        num_inference_steps: Number of inference steps (default: 20).
+        num_inference_steps: Number of inference steps (default: 4 for 4-step Lightning LoRA).
         guidance_scale: Guidance scale (default: 1.0).
     
     Returns:
