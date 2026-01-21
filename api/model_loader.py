@@ -62,7 +62,9 @@ def load_model(
     """
     Load Qwen-Image-Edit-2511 model with 4-step Lightning LoRA using HuggingFace Diffusers.
     
-    Uses BF16 base model with 4-step Lightning LoRA (BF16).
+    Attempts to load native BF16 weights (avoids runtime FP32->BF16 conversion for better quality).
+    Falls back to native format with aggressive CPU offload if BF16 causes OOM.
+    Uses 4-step Lightning LoRA (BF16) for fast inference.
     Uses 4 inference steps (optimized for the Lightning LoRA) with sequential CPU offload for memory management.
     
     Args:
@@ -77,7 +79,7 @@ def load_model(
         raise RuntimeError("CUDA is not available. Set device='cpu' or ensure GPU is accessible.")
     
     try:
-        from diffusers import DiffusionPipeline
+        from diffusers import QwenImageEditPlusPipeline
         from peft import PeftModel
         import safetensors
     except ImportError as e:
@@ -121,55 +123,71 @@ def load_model(
         logger.info(f"CUDA memory before load: {torch.cuda.memory_allocated()/1e9:.2f}GB allocated")
     
     try:
-        # Load base pipeline from Diffusers
+        # Load base pipeline from Diffusers using QwenImageEditPlusPipeline
         logger.info(f"Loading pipeline from: {model_path}")
-        logger.info("Using torch_dtype=torch.bfloat16 for memory efficiency (BF16)")
         
-        # Load the pipeline with BF16 (half precision but still high quality)
-        # FP32 uses too much memory (44GB+), BF16 uses ~22GB and maintains quality
-        # Note: device_map is not used here - we use enable_model_cpu_offload() instead
-        # Skip video processor if present (we only need image processing)
+        # Strategy: Try to load with BF16 dtype first - Diffusers will use native BF16 weights if available
+        # If that causes OOM, fall back to native format with aggressive CPU offload
+        logger.info("Attempting to load with BF16 dtype (will use native BF16 weights if available)...")
+        
+        pipe = None
+        
         try:
-            pipe = DiffusionPipeline.from_pretrained(
+            # First try: Load with BF16 dtype - Diffusers uses native BF16 weights if model has them
+            # This avoids runtime casting if BF16 weights exist in the repository
+            pipe = QwenImageEditPlusPipeline.from_pretrained(
                 model_path,
-                torch_dtype=torch.bfloat16,  # BF16 for memory efficiency
+                torch_dtype=torch.bfloat16,  # Request BF16 - uses native BF16 weights if available
                 cache_dir=cache_dir,
             )
+            
+            # Check what dtype was actually loaded
+            if hasattr(pipe, 'transformer'):
+                actual_dtype = next(pipe.transformer.parameters()).dtype
+                logger.info(f"Model loaded - transformer dtype: {actual_dtype}")
+            elif hasattr(pipe, 'unet'):
+                actual_dtype = next(pipe.unet.parameters()).dtype
+                logger.info(f"Model loaded - unet dtype: {actual_dtype}")
+            
+            logger.info("Pipeline loaded successfully with BF16")
+                    
+        except torch.cuda.OutOfMemoryError as oom_error:
+            logger.warning(f"OOM with BF16: {oom_error}")
+            logger.info("Falling back to native format with aggressive CPU offload...")
+            
+            # Clear memory
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                gc.collect()
+            
+            # Fallback: Load in native format (likely FP32) with aggressive CPU offload
+            pipe = QwenImageEditPlusPipeline.from_pretrained(
+                model_path,
+                cache_dir=cache_dir,
+            )
+            logger.info("Pipeline loaded in native format")
+            
         except Exception as e:
-            # If loading fails due to video processor, try loading without it
-            if "VideoProcessor" in str(e) or "torchvision" in str(e):
-                logger.warning(f"Initial load failed (likely video processor issue): {e}")
-                logger.info("Attempting to load without video processor...")
-                # Try loading components manually
-                from diffusers import AutoencoderKL, UNet2DConditionModel
-                from transformers import CLIPTextModel, CLIPTokenizer
-                
-                # Load components individually with BF16
-                vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", torch_dtype=torch.bfloat16)
-                text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder", torch_dtype=torch.bfloat16)
-                tokenizer = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer")
-                unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", torch_dtype=torch.bfloat16)
-                
-                # Create pipeline from components
-                pipe = DiffusionPipeline.from_pretrained(
-                    model_path,
-                    vae=vae,
-                    text_encoder=text_encoder,
-                    tokenizer=tokenizer,
-                    unet=unet,
-                    torch_dtype=torch.bfloat16,
-                    cache_dir=cache_dir,
-                )
-            else:
-                raise
+            logger.error(f"Failed to load pipeline: {e}")
+            raise
         
         logger.info("Pipeline loaded successfully")
         
-        # Enable sequential CPU offload for better memory management
-        # This is more aggressive than enable_model_cpu_offload()
-        logger.info("Enabling sequential CPU offload...")
+        # Enable sequential CPU offload for aggressive memory management
+        # This moves components to CPU one at a time during inference
+        # More aggressive than enable_model_cpu_offload()
+        logger.info("Enabling sequential CPU offload (aggressive memory management)...")
         pipe.enable_sequential_cpu_offload()
-        logger.info("Sequential CPU offload enabled")
+        
+        # Also enable VAE CPU offload for additional memory savings
+        if hasattr(pipe, 'enable_vae_slicing'):
+            pipe.enable_vae_slicing()
+            logger.info("VAE slicing enabled")
+        if hasattr(pipe, 'enable_vae_tiling'):
+            pipe.enable_vae_tiling()
+            logger.info("VAE tiling enabled")
+        
+        logger.info("CPU offload and optimizations enabled")
         
         # Load LoRA weights
         logger.info(f"Loading 4-step Lightning LoRA: {lora_path}")
@@ -214,7 +232,7 @@ def get_model_info() -> dict:
     """Get information about the loaded model."""
     return {
         "model_name": "Qwen-Image-Edit-2511",
-        "precision": "BF16 base + 4-step Lightning LoRA",
+        "precision": "Native BF16 (if available) + 4-step Lightning LoRA",
         "framework": "HuggingFace Diffusers",
         "lora": True,
         "lora_type": "4-step Lightning LoRA (BF16)",
