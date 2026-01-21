@@ -126,10 +126,10 @@ def load_model(
         logger.info("Using torch_dtype=torch.float32 for full precision")
         
         # Load the pipeline with full precision
+        # Note: device_map is not used here - we use enable_model_cpu_offload() instead
         pipe = DiffusionPipeline.from_pretrained(
             model_path,
             torch_dtype=torch.float32,  # Full precision
-            device_map="auto",  # Auto device placement
             cache_dir=cache_dir,
         )
         
