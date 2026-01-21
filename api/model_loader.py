@@ -124,49 +124,34 @@ def load_model(
     
     try:
         # Load base pipeline from Diffusers using QwenImageEditPlusPipeline
+        # The official Qwen/Qwen-Image-Edit-2511 model stores weights in BF16 format
+        # Loading with torch_dtype=torch.bfloat16 uses those native BF16 weights directly
         logger.info(f"Loading pipeline from: {model_path}")
-        
-        # Strategy: Try to load with BF16 dtype first - Diffusers will use native BF16 weights if available
-        # If that causes OOM, fall back to native format with aggressive CPU offload
-        logger.info("Attempting to load with BF16 dtype (will use native BF16 weights if available)...")
-        
-        pipe = None
+        logger.info("Loading with torch_dtype=torch.bfloat16 to use native BF16 weights (no conversion)...")
         
         try:
-            # First try: Load with BF16 dtype - Diffusers uses native BF16 weights if model has them
-            # This avoids runtime casting if BF16 weights exist in the repository
+            # Load with BF16 dtype - Diffusers will use the native BF16 weights from the repository
+            # The official model has BF16 weights stored, so this avoids FP32->BF16 conversion
             pipe = QwenImageEditPlusPipeline.from_pretrained(
                 model_path,
-                torch_dtype=torch.bfloat16,  # Request BF16 - uses native BF16 weights if available
+                torch_dtype=torch.bfloat16,  # Use native BF16 weights (no runtime conversion)
                 cache_dir=cache_dir,
             )
             
-            # Check what dtype was actually loaded
+            # Verify dtype
             if hasattr(pipe, 'transformer'):
                 actual_dtype = next(pipe.transformer.parameters()).dtype
-                logger.info(f"Model loaded - transformer dtype: {actual_dtype}")
+                logger.info(f"✓ Model loaded - transformer dtype: {actual_dtype}")
+                if actual_dtype == torch.bfloat16:
+                    logger.info("✓ Using native BF16 weights (no conversion)")
+                else:
+                    logger.warning(f"⚠ Model loaded in {actual_dtype}, not BF16")
             elif hasattr(pipe, 'unet'):
                 actual_dtype = next(pipe.unet.parameters()).dtype
-                logger.info(f"Model loaded - unet dtype: {actual_dtype}")
+                logger.info(f"✓ Model loaded - unet dtype: {actual_dtype}")
             
-            logger.info("Pipeline loaded successfully with BF16")
+            logger.info("Pipeline loaded successfully")
                     
-        except torch.cuda.OutOfMemoryError as oom_error:
-            logger.warning(f"OOM with BF16: {oom_error}")
-            logger.info("Falling back to native format with aggressive CPU offload...")
-            
-            # Clear memory
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                gc.collect()
-            
-            # Fallback: Load in native format (likely FP32) with aggressive CPU offload
-            pipe = QwenImageEditPlusPipeline.from_pretrained(
-                model_path,
-                cache_dir=cache_dir,
-            )
-            logger.info("Pipeline loaded in native format")
-            
         except Exception as e:
             logger.error(f"Failed to load pipeline: {e}")
             raise
