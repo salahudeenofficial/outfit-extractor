@@ -12,3 +12,4 @@ safetensors
 accelerate
 transformers
 torch
+torchvision
