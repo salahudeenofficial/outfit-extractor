@@ -1,7 +1,7 @@
 """Model loader for Qwen-Image-Edit-2511 with 4-step Lightning LoRA using HuggingFace Diffusers.
 
-Diffusers branch: Uses full precision base model with 4-step Lightning LoRA via Diffusers library.
-Runs 4 inference steps (optimized for Lightning LoRA) with CPU offload for memory management.
+Diffusers branch: Uses BF16 base model with 4-step Lightning LoRA via Diffusers library.
+Runs 4 inference steps (optimized for Lightning LoRA) with sequential CPU offload for memory management.
 """
 
 import os
@@ -62,8 +62,8 @@ def load_model(
     """
     Load Qwen-Image-Edit-2511 model with 4-step Lightning LoRA using HuggingFace Diffusers.
     
-    Uses full precision base model with 4-step Lightning LoRA (BF16).
-    Uses 4 inference steps (optimized for the Lightning LoRA) with CPU offload for memory management.
+    Uses BF16 base model with 4-step Lightning LoRA (BF16).
+    Uses 4 inference steps (optimized for the Lightning LoRA) with sequential CPU offload for memory management.
     
     Args:
         model_path: Path to BASE model checkpoint (Qwen-Image-Edit-2511) or HuggingFace model ID.
@@ -112,7 +112,7 @@ def load_model(
         )
     
     logger.info(f"4-step Lightning LoRA weights found: {lora_path}")
-    logger.info("Mode: Full precision base model + 4-step Lightning LoRA with CPU offload")
+    logger.info("Mode: BF16 base model + 4-step Lightning LoRA with sequential CPU offload")
     
     # Clear GPU memory before loading
     if torch.cuda.is_available():
@@ -123,15 +123,16 @@ def load_model(
     try:
         # Load base pipeline from Diffusers
         logger.info(f"Loading pipeline from: {model_path}")
-        logger.info("Using torch_dtype=torch.float32 for full precision")
+        logger.info("Using torch_dtype=torch.bfloat16 for memory efficiency (BF16)")
         
-        # Load the pipeline with full precision
+        # Load the pipeline with BF16 (half precision but still high quality)
+        # FP32 uses too much memory (44GB+), BF16 uses ~22GB and maintains quality
         # Note: device_map is not used here - we use enable_model_cpu_offload() instead
         # Skip video processor if present (we only need image processing)
         try:
             pipe = DiffusionPipeline.from_pretrained(
                 model_path,
-                torch_dtype=torch.float32,  # Full precision
+                torch_dtype=torch.bfloat16,  # BF16 for memory efficiency
                 cache_dir=cache_dir,
             )
         except Exception as e:
@@ -143,11 +144,11 @@ def load_model(
                 from diffusers import AutoencoderKL, UNet2DConditionModel
                 from transformers import CLIPTextModel, CLIPTokenizer
                 
-                # Load components individually
-                vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", torch_dtype=torch.float32)
-                text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder", torch_dtype=torch.float32)
+                # Load components individually with BF16
+                vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", torch_dtype=torch.bfloat16)
+                text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder", torch_dtype=torch.bfloat16)
                 tokenizer = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer")
-                unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", torch_dtype=torch.float32)
+                unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", torch_dtype=torch.bfloat16)
                 
                 # Create pipeline from components
                 pipe = DiffusionPipeline.from_pretrained(
@@ -156,7 +157,7 @@ def load_model(
                     text_encoder=text_encoder,
                     tokenizer=tokenizer,
                     unet=unet,
-                    torch_dtype=torch.float32,
+                    torch_dtype=torch.bfloat16,
                     cache_dir=cache_dir,
                 )
             else:
@@ -164,10 +165,11 @@ def load_model(
         
         logger.info("Pipeline loaded successfully")
         
-        # Enable CPU offload for memory management
-        logger.info("Enabling CPU offload...")
-        pipe.enable_model_cpu_offload()
-        logger.info("CPU offload enabled")
+        # Enable sequential CPU offload for better memory management
+        # This is more aggressive than enable_model_cpu_offload()
+        logger.info("Enabling sequential CPU offload...")
+        pipe.enable_sequential_cpu_offload()
+        logger.info("Sequential CPU offload enabled")
         
         # Load LoRA weights
         logger.info(f"Loading 4-step Lightning LoRA: {lora_path}")
@@ -201,7 +203,7 @@ def load_model(
             total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
             logger.info(f"GPU Memory: {allocated:.2f} GB / {total:.2f} GB")
         
-        logger.info("Pipeline initialized successfully (Full precision base + 4-step Lightning LoRA + CPU offload)")
+        logger.info("Pipeline initialized successfully (BF16 base + 4-step Lightning LoRA + sequential CPU offload)")
         return pipe
         
     except Exception as e:
@@ -212,11 +214,11 @@ def get_model_info() -> dict:
     """Get information about the loaded model."""
     return {
         "model_name": "Qwen-Image-Edit-2511",
-        "precision": "Full precision base + 4-step Lightning LoRA",
+        "precision": "BF16 base + 4-step Lightning LoRA",
         "framework": "HuggingFace Diffusers",
         "lora": True,
         "lora_type": "4-step Lightning LoRA (BF16)",
-        "cpu_offload": True,
+        "cpu_offload": "sequential",
         "inference_steps": 4,
         "device": "cuda" if torch.cuda.is_available() else "cpu"
     }
