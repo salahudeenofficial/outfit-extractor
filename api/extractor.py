@@ -118,7 +118,7 @@ def extract_outfit(
     pipeline: Any,
     input_image: Image.Image,
     prompt: Optional[str] = None,
-    num_inference_steps: int = 4,
+    num_inference_steps: int = 20,
     guidance_scale: float = 1.0,
     height: Optional[int] = None,
     width: Optional[int] = None
@@ -130,7 +130,8 @@ def extract_outfit(
         pipeline: Loaded model pipeline.
         input_image: Input PIL Image containing person with outfit.
         prompt: Custom prompt (uses default if None).
-        num_inference_steps: Number of inference steps (4 for Lightning).
+        num_inference_steps: Number of inference steps (default: 20).
+            Note: For LightX2V, steps are set during generator creation, this parameter is for API compatibility.
         guidance_scale: Guidance scale for generation.
         height: Output height (uses input height if None).
         width: Output width (uses input width if None).
